@@ -258,6 +258,12 @@
       align-items: center;
     }
 
+    .rank-item strong {
+      display: block;
+      word-break: break-word;
+      white-space: normal;
+    }
+
     .rank-no {
       width: 30px;
       height: 30px;
@@ -1966,9 +1972,10 @@
 
           const productKey = row.product_id || row.product_name_raw;
           const product = productMap.get(productKey) || {
-            label: row.product_name_cn || row.product_name_raw || row.product_id,
+            label: row.product_name_raw || row.product_name_cn || row.product_id,
             sub: `${row.product_period || "未设置阶段"} / ${row.product_id || "无 PID"}`,
-            metric: 0
+            metric: 0,
+            truncateLabel: false
           };
           product.metric += row.gmv;
           productMap.set(productKey, product);
@@ -2088,8 +2095,8 @@
         <div class="rank-item">
           <div class="rank-no">${index + 1}</div>
           <div>
-            <strong>${short(row.label, 34)}</strong>
-            <div class="mini">${row.sub}</div>
+            <strong>${escapeHtml(row.truncateLabel === false ? row.label : short(row.label, 34))}</strong>
+            <div class="mini">${escapeHtml(row.sub)}</div>
           </div>
           <div class="pill">${formatter(row.metric)}</div>
         </div>
