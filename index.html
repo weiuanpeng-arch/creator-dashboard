@@ -2101,12 +2101,11 @@
       const extra = String(secondary || "").trim();
       if (!main) return '<span class="mini">无产品名</span>';
       const hasExtra = extra && normalizeText(extra) !== normalizeText(main);
-      const fullText = hasExtra ? `${main}\n${extra}` : main;
+      const fullText = hasExtra ? `${escapeHtml(main)}<br><span class="mini">${escapeHtml(extra)}</span>` : escapeHtml(main);
       return `
-        <details class="cell-details">
-          <summary>${escapeHtml(short(main, 26))}</summary>
-          <div class="full-text">${escapeHtml(fullText).replace(/\n/g, "<br>")}</div>
-        </details>
+        <div class="cell-details">
+          <div class="full-text">${fullText}</div>
+        </div>
       `;
     }
 
@@ -2170,7 +2169,7 @@
     }
 
     function renderFilterOptions(rows) {
-      const brands = [...new Set(rows.map((row) => row.brand).filter(Boolean))].sort();
+      const brands = [...new Set([...BRANDS.map((brand) => brand.toUpperCase()), ...rows.map((row) => row.brand).filter(Boolean)])].sort();
       const levels = (state.currentView === "lifecycle" || state.currentView === "refund")
         ? [...new Set(
             (

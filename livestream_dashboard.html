@@ -1,0 +1,1459 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>直播数据监控看板</title>
+  <script src="https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js"></script>
+  <style>
+    :root {
+      --bg: #f7f2ea;
+      --panel: rgba(255, 252, 247, 0.9);
+      --panel-solid: #fffaf4;
+      --line: rgba(88, 67, 45, 0.12);
+      --ink: #2e241c;
+      --muted: #756758;
+      --accent: #c55d28;
+      --accent-deep: #8d3914;
+      --green: #5c7451;
+      --green-soft: rgba(92, 116, 81, 0.14);
+      --sand: #e7c9ab;
+      --gold: #a77529;
+      --rose: #ad5546;
+      --rose-soft: rgba(173, 85, 70, 0.14);
+      --shadow: 0 24px 60px rgba(90, 68, 48, 0.12);
+      --radius: 24px;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      color: var(--ink);
+      font-family: "Avenir Next", "PingFang SC", "Microsoft YaHei", sans-serif;
+      background:
+        radial-gradient(circle at top left, rgba(197, 93, 40, 0.1), transparent 24%),
+        radial-gradient(circle at top right, rgba(92, 116, 81, 0.1), transparent 30%),
+        linear-gradient(180deg, #fcf8f3 0%, var(--bg) 100%);
+    }
+
+    .shell {
+      width: min(1440px, calc(100% - 28px));
+      margin: 18px auto 48px;
+    }
+
+    .panel {
+      background: var(--panel);
+      backdrop-filter: blur(14px);
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      box-shadow: var(--shadow);
+    }
+
+    .hero,
+    .section {
+      padding: 24px;
+    }
+
+    .hero {
+      position: relative;
+      overflow: hidden;
+      display: grid;
+      gap: 20px;
+    }
+
+    .hero::after {
+      content: "";
+      position: absolute;
+      right: -90px;
+      top: -100px;
+      width: 320px;
+      height: 320px;
+      border-radius: 50%;
+      background: radial-gradient(circle, rgba(197, 93, 40, 0.18) 0%, rgba(197, 93, 40, 0) 72%);
+      pointer-events: none;
+    }
+
+    .hero-top,
+    .panel-top,
+    .upload-actions,
+    .filters {
+      display: flex;
+      justify-content: space-between;
+      gap: 14px;
+      align-items: flex-start;
+      flex-wrap: wrap;
+    }
+
+    .eyebrow,
+    .tag,
+    .chip,
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 8px 12px;
+      border-radius: 999px;
+      font-size: 12px;
+      font-weight: 800;
+    }
+
+    .eyebrow,
+    .tag,
+    .chip {
+      background: rgba(197, 93, 40, 0.12);
+      color: var(--accent-deep);
+    }
+
+    .badge.ok {
+      color: var(--green);
+      background: var(--green-soft);
+    }
+
+    .badge.warn {
+      color: var(--gold);
+      background: rgba(167, 117, 41, 0.14);
+    }
+
+    .badge.risk {
+      color: var(--rose);
+      background: var(--rose-soft);
+    }
+
+    h1,
+    h2,
+    h3,
+    p {
+      margin: 0;
+    }
+
+    h1 {
+      font-size: clamp(30px, 4vw, 54px);
+      letter-spacing: -0.05em;
+      line-height: 0.98;
+      max-width: 760px;
+      margin-top: 10px;
+    }
+
+    .subcopy,
+    .muted,
+    .field-note {
+      color: var(--muted);
+      line-height: 1.7;
+      font-size: 13px;
+    }
+
+    .hero-meta {
+      min-width: 320px;
+      display: grid;
+      gap: 12px;
+    }
+
+    .brief {
+      padding: 18px;
+      border-radius: 20px;
+      background: rgba(255, 255, 255, 0.74);
+      border: 1px solid rgba(88, 67, 45, 0.08);
+    }
+
+    .brief strong {
+      display: block;
+      font-size: 12px;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: var(--muted);
+      margin-bottom: 8px;
+    }
+
+    .brief span {
+      font-size: 25px;
+      font-weight: 800;
+    }
+
+    button,
+    select,
+    input {
+      font: inherit;
+    }
+
+    button {
+      appearance: none;
+      border: 0;
+      border-radius: 16px;
+      padding: 12px 16px;
+      font-weight: 800;
+      cursor: pointer;
+      background: var(--accent);
+      color: white;
+    }
+
+    button.secondary {
+      background: rgba(255, 255, 255, 0.88);
+      color: var(--ink);
+      border: 1px solid var(--line);
+    }
+
+    button:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+
+    .upload-grid,
+    .stats-grid,
+    .triple-grid,
+    .double-grid {
+      display: grid;
+      gap: 18px;
+      margin-top: 18px;
+    }
+
+    .upload-grid {
+      grid-template-columns: 1.1fr 1fr;
+    }
+
+    .stats-grid {
+      grid-template-columns: repeat(6, minmax(0, 1fr));
+    }
+
+    .triple-grid {
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+    }
+
+    .double-grid {
+      grid-template-columns: 1.15fr 1fr;
+    }
+
+    .card,
+    .upload-card,
+    .item,
+    .bar-item,
+    .rank-item {
+      background: rgba(255, 255, 255, 0.74);
+      border: 1px solid rgba(88, 67, 45, 0.08);
+      border-radius: 20px;
+    }
+
+    .upload-card,
+    .card {
+      padding: 18px;
+    }
+
+    .upload-card {
+      display: grid;
+      gap: 12px;
+    }
+
+    .upload-card input[type="file"],
+    .filters input,
+    .filters select {
+      width: 100%;
+      padding: 12px 14px;
+      border-radius: 14px;
+      border: 1px solid rgba(88, 67, 45, 0.14);
+      background: #fffdfa;
+      color: var(--ink);
+    }
+
+    .status-line {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      font-size: 13px;
+      color: var(--muted);
+    }
+
+    .status-dot {
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      background: currentColor;
+    }
+
+    .status-line.ok {
+      color: var(--green);
+    }
+
+    .status-line.warn {
+      color: var(--gold);
+    }
+
+    .status-line.risk {
+      color: var(--rose);
+    }
+
+    .stat-card {
+      padding: 18px;
+      min-height: 150px;
+    }
+
+    .stat-card small {
+      display: block;
+      margin-bottom: 16px;
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    .stat-card .value {
+      font-size: 30px;
+      font-weight: 800;
+      letter-spacing: -0.04em;
+      margin-bottom: 8px;
+    }
+
+    .list,
+    .rank-list,
+    .bar-list {
+      display: grid;
+      gap: 12px;
+      margin-top: 14px;
+    }
+
+    .item,
+    .rank-item,
+    .bar-item {
+      padding: 14px 16px;
+    }
+
+    .rank-item {
+      display: grid;
+      grid-template-columns: 38px 1fr auto;
+      gap: 12px;
+      align-items: center;
+    }
+
+    .rank-no {
+      width: 34px;
+      height: 34px;
+      border-radius: 12px;
+      display: grid;
+      place-items: center;
+      font-size: 12px;
+      font-weight: 800;
+      color: var(--accent-deep);
+      background: rgba(197, 93, 40, 0.12);
+    }
+
+    .item-top,
+    .bar-top {
+      display: flex;
+      justify-content: space-between;
+      gap: 10px;
+      align-items: center;
+    }
+
+    .progress-track {
+      width: 100%;
+      height: 10px;
+      border-radius: 999px;
+      background: rgba(88, 67, 45, 0.08);
+      overflow: hidden;
+      margin-top: 10px;
+    }
+
+    .progress-fill {
+      height: 100%;
+      border-radius: 999px;
+      background: linear-gradient(90deg, var(--accent), var(--sand));
+    }
+
+    .progress-fill.green {
+      background: linear-gradient(90deg, #6f8d5d, #aec59d);
+    }
+
+    .filters {
+      margin-top: 16px;
+      align-items: stretch;
+    }
+
+    .filters > * {
+      flex: 1 1 180px;
+    }
+
+    .filters button {
+      flex: 0 0 auto;
+      align-self: stretch;
+    }
+
+    .notice-stack {
+      display: grid;
+      gap: 10px;
+      margin-top: 14px;
+    }
+
+    .notice {
+      padding: 14px 16px;
+      border-radius: 18px;
+      border: 1px solid rgba(88, 67, 45, 0.08);
+      background: rgba(255, 255, 255, 0.7);
+      font-size: 13px;
+      line-height: 1.65;
+    }
+
+    .notice.warn {
+      border-color: rgba(167, 117, 41, 0.18);
+      background: rgba(255, 247, 235, 0.96);
+    }
+
+    .notice.risk {
+      border-color: rgba(173, 85, 70, 0.2);
+      background: rgba(255, 243, 241, 0.96);
+    }
+
+    .table-wrap {
+      overflow: auto;
+      max-height: 520px;
+      margin-top: 14px;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 13px;
+    }
+
+    th,
+    td {
+      text-align: left;
+      padding: 12px 10px;
+      vertical-align: top;
+      border-bottom: 1px solid rgba(88, 67, 45, 0.08);
+    }
+
+    th {
+      position: sticky;
+      top: 0;
+      z-index: 1;
+      background: var(--panel-solid);
+      color: var(--muted);
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+    }
+
+    .product-cell {
+      max-width: 360px;
+      line-height: 1.5;
+      font-weight: 700;
+    }
+
+    .page-foot {
+      display: flex;
+      justify-content: space-between;
+      gap: 12px;
+      align-items: center;
+      flex-wrap: wrap;
+      margin-top: 12px;
+    }
+
+    .empty {
+      padding: 20px;
+      border-radius: 18px;
+      border: 1px dashed rgba(88, 67, 45, 0.16);
+      color: var(--muted);
+      background: rgba(255, 255, 255, 0.68);
+      font-size: 13px;
+    }
+
+    @media (max-width: 1180px) {
+      .upload-grid,
+      .stats-grid,
+      .triple-grid,
+      .double-grid {
+        grid-template-columns: 1fr 1fr;
+      }
+    }
+
+    @media (max-width: 760px) {
+      .shell {
+        width: min(100% - 16px, 100%);
+        margin-top: 8px;
+      }
+
+      .hero,
+      .section {
+        padding: 18px;
+      }
+
+      .upload-grid,
+      .stats-grid,
+      .triple-grid,
+      .double-grid {
+        grid-template-columns: 1fr;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="shell">
+    <section class="panel hero">
+      <div class="hero-top">
+        <div>
+          <div class="eyebrow">Livestream Product Monitor / v1</div>
+          <h1>直播数据监控看板</h1>
+          <p class="subcopy">这版看板现在切到纯 `LIVE` 口径：只使用直播相关字段，例如 `LIVE GMV`、`LIVE items sold`、`LIVE impressions`、`Page views from LIVE` 与 `LIVE conversion rate`。`产品生命周期表` 继续按 `PID` 回填产品阶段，并额外展示不同生命周期的 `LIVE GMV` 占比。</p>
+        </div>
+        <div class="hero-meta">
+          <div class="brief">
+            <strong>当前周期</strong>
+            <span id="periodLabel">等待上传</span>
+          </div>
+          <div class="brief">
+            <strong>当前口径</strong>
+            <span>产品维度 + 生命周期</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="upload-grid">
+        <div class="upload-card">
+          <div class="panel-top">
+            <div>
+              <h3>1. 上传直播数据底表</h3>
+              <p class="field-note">支持一个工作簿内多个 sheet。系统会优先按 sheet 名识别 `Sparco / Letme / Stypro / Icyee`，如果 sheet 名不规范，再尝试从产品名兜底识别品牌。</p>
+            </div>
+            <div class="chip">核心数据源</div>
+          </div>
+          <input id="productWorkbook" type="file" accept=".xlsx,.xls">
+          <div class="status-line" id="productStatus"><span class="status-dot"></span>等待上传</div>
+        </div>
+
+        <div class="upload-card">
+          <div class="panel-top">
+            <div>
+              <h3>2. 上传产品生命周期表</h3>
+              <p class="field-note">支持单 sheet。系统会读取 `PID / product period / 产品名 / product name`，并将直播产品通过 `PID` 映射到生命周期阶段。</p>
+            </div>
+            <div class="chip">维度补充</div>
+          </div>
+          <input id="lifecycleWorkbook" type="file" accept=".xlsx,.xls">
+          <div class="status-line" id="lifecycleStatus"><span class="status-dot"></span>等待上传</div>
+        </div>
+      </div>
+
+      <div class="upload-actions">
+        <div class="muted">如果你只上传直播底表，看板也能先出结果；生命周期相关模块会标记为“未匹配”。</div>
+        <div style="display:flex; gap:10px; flex-wrap:wrap;">
+          <button id="buildBtn" disabled>生成看板</button>
+          <button id="resetDataBtn" class="secondary" disabled>清空当前数据</button>
+        </div>
+      </div>
+
+      <div class="notice-stack" id="heroNotices">
+        <div class="notice">上传后会自动检测是否真的包含 `Sparco / Letme / Stypro / Icyee` 四个工作表。如果缺失，页面会保留可用数据，但同时在健康度里提示缺口。</div>
+      </div>
+    </section>
+
+    <section class="stats-grid" id="statsGrid"></section>
+
+    <section class="panel section">
+      <div class="panel-top">
+        <div>
+          <h2>筛选器</h2>
+          <p class="muted">先从品牌、生命周期、状态与关键词筛出你要追的产品，再看排行和明细。</p>
+        </div>
+        <div class="tag">实时过滤</div>
+      </div>
+      <div class="filters">
+        <select id="brandFilter" disabled>
+          <option value="">全部品牌</option>
+        </select>
+        <select id="periodFilter" disabled>
+          <option value="">全部生命周期</option>
+        </select>
+        <select id="statusFilter" disabled>
+          <option value="">全部状态</option>
+        </select>
+        <input id="keywordFilter" type="search" placeholder="搜索产品名 / PID / sheet" disabled>
+        <button id="resetFilterBtn" class="secondary" disabled>重置筛选</button>
+      </div>
+    </section>
+
+    <section class="triple-grid">
+      <div class="panel section">
+        <div class="panel-top">
+          <div>
+            <h2>品牌 LIVE 总览</h2>
+            <p class="muted">按品牌聚合有 LIVE 表现的产品数、LIVE GMV、LIVE 销量，以及生命周期命中情况。</p>
+          </div>
+          <div class="tag">Brand Rollup</div>
+        </div>
+        <div class="bar-list" id="brandList">
+          <div class="empty">上传 Excel 后显示。</div>
+        </div>
+      </div>
+
+      <div class="panel section">
+        <div class="panel-top">
+          <div>
+            <h2>生命周期 LIVE GMV 占比</h2>
+            <p class="muted">这里看的是不同生命周期对总 LIVE GMV 的贡献占比，方便你判断直播成交主要压在哪个阶段。</p>
+          </div>
+          <div class="tag">Lifecycle Mix</div>
+        </div>
+        <div class="bar-list" id="lifecycleList">
+          <div class="empty">上传 Excel 后显示。</div>
+        </div>
+      </div>
+
+      <div class="panel section">
+        <div class="panel-top">
+          <div>
+            <h2>LIVE 核心概览</h2>
+            <p class="muted">这里集中看 LIVE 口径下的产品渗透、零成交流量和平均单品产出，不再混入其他渠道数据。</p>
+          </div>
+          <div class="tag">Channel Split</div>
+        </div>
+        <div class="bar-list" id="channelList">
+          <div class="empty">上传 Excel 后显示。</div>
+        </div>
+      </div>
+    </section>
+
+    <section class="double-grid">
+      <div class="panel section">
+        <div class="panel-top">
+          <div>
+            <h2>Top LIVE 产品</h2>
+            <p class="muted">默认按 LIVE GMV 排序，帮助你快速锁定这期直播里真正跑出成交的产品。</p>
+          </div>
+          <div class="tag">Top LIVE GMV</div>
+        </div>
+        <div class="rank-list" id="topProductList">
+          <div class="empty">上传 Excel 后显示。</div>
+        </div>
+      </div>
+
+      <div class="panel section">
+        <div class="panel-top">
+          <div>
+            <h2>未匹配生命周期的 LIVE 产品</h2>
+            <p class="muted">这部分产品已经有 LIVE 表现，但还没从生命周期底表里回填到阶段，建议优先补齐。</p>
+          </div>
+          <div class="tag">Need Mapping</div>
+        </div>
+        <div class="rank-list" id="unmatchedList">
+          <div class="empty">上传 Excel 后显示。</div>
+        </div>
+      </div>
+    </section>
+
+    <section class="double-grid">
+      <div class="panel section">
+        <div class="panel-top">
+          <div>
+            <h2>数据健康度</h2>
+            <p class="muted">这里不看业务好坏，而是看底表口径是否足够稳定，能不能支撑后续日常看板。</p>
+          </div>
+          <div class="tag">Data Health</div>
+        </div>
+        <div class="list" id="healthList">
+          <div class="empty">上传 Excel 后显示。</div>
+        </div>
+      </div>
+
+      <div class="panel section">
+        <div class="panel-top">
+          <div>
+            <h2>重点提醒</h2>
+            <p class="muted">我会把需要你马上确认的口径问题集中放这里，避免看板看起来有数，但其实结构不完整。</p>
+          </div>
+          <div class="tag">Watchouts</div>
+        </div>
+        <div class="notice-stack" id="noticeList">
+          <div class="empty">上传 Excel 后显示。</div>
+        </div>
+      </div>
+    </section>
+
+    <section class="panel section">
+      <div class="panel-top">
+        <div>
+          <h2>产品明细</h2>
+          <p class="muted">当前表只保留 LIVE 相关字段，便于你直接排查直播流量、转化与成交表现。</p>
+        </div>
+        <div class="tag">Detail Table</div>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>品牌</th>
+              <th>Sheet</th>
+              <th>PID</th>
+              <th>产品</th>
+              <th>生命周期</th>
+              <th>状态</th>
+              <th>LIVE 销量</th>
+              <th>LIVE GMV</th>
+              <th>LIVE 曝光</th>
+              <th>LIVE 页面浏览</th>
+              <th>LIVE 独立浏览</th>
+              <th>LIVE 买家数</th>
+              <th>LIVE CTR</th>
+              <th>LIVE CVR</th>
+            </tr>
+          </thead>
+          <tbody id="detailTable">
+            <tr><td colspan="14"><div class="empty">上传 Excel 后显示。</div></td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="page-foot">
+        <div class="muted" id="tableMeta">当前没有数据。</div>
+      </div>
+    </section>
+  </div>
+
+  <script>
+    const EXPECTED_SHEETS = ["Sparco", "Letme", "Stypro", "Icyee"];
+    const BRAND_ORDER = ["Sparco", "Letme", "Stypro", "Icyee", "Other", "Unknown"];
+
+    const state = {
+      productFile: null,
+      lifecycleFile: null,
+      rows: [],
+      filteredRows: [],
+      lifecycleMap: new Map(),
+      notices: [],
+      meta: {
+        periods: [],
+        sheets: [],
+        rawRows: 0,
+        liveRows: 0,
+        matchedLifecycle: 0,
+        blankLifecycle: 0,
+        unknownBrandRows: 0
+      }
+    };
+
+    const refs = {
+      productWorkbook: document.getElementById("productWorkbook"),
+      lifecycleWorkbook: document.getElementById("lifecycleWorkbook"),
+      productStatus: document.getElementById("productStatus"),
+      lifecycleStatus: document.getElementById("lifecycleStatus"),
+      buildBtn: document.getElementById("buildBtn"),
+      resetDataBtn: document.getElementById("resetDataBtn"),
+      periodLabel: document.getElementById("periodLabel"),
+      heroNotices: document.getElementById("heroNotices"),
+      statsGrid: document.getElementById("statsGrid"),
+      brandFilter: document.getElementById("brandFilter"),
+      periodFilter: document.getElementById("periodFilter"),
+      statusFilter: document.getElementById("statusFilter"),
+      keywordFilter: document.getElementById("keywordFilter"),
+      resetFilterBtn: document.getElementById("resetFilterBtn"),
+      brandList: document.getElementById("brandList"),
+      lifecycleList: document.getElementById("lifecycleList"),
+      channelList: document.getElementById("channelList"),
+      topProductList: document.getElementById("topProductList"),
+      unmatchedList: document.getElementById("unmatchedList"),
+      healthList: document.getElementById("healthList"),
+      noticeList: document.getElementById("noticeList"),
+      detailTable: document.getElementById("detailTable"),
+      tableMeta: document.getElementById("tableMeta")
+    };
+
+    const formatInt = (value) => new Intl.NumberFormat("zh-CN").format(Number(value || 0));
+    const formatRp = (value) => `Rp ${formatInt(Math.round(Number(value || 0)))}`;
+    const formatPct = (value) => `${Number(value || 0).toFixed(2)}%`;
+    const escapeHtml = (value) => String(value ?? "")
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;")
+      .replace(/'/g, "&#39;");
+
+    function normalizeText(value) {
+      return String(value ?? "")
+        .trim()
+        .toLowerCase()
+        .replace(/\n/g, " ")
+        .replace(/\s+/g, " ");
+    }
+
+    function normalizeHeader(value) {
+      return normalizeText(value).replace(/[_-]+/g, " ");
+    }
+
+    function safeNumber(value) {
+      if (value === null || value === undefined) return 0;
+      if (typeof value === "number") return Number.isFinite(value) ? value : 0;
+      const text = String(value).trim();
+      if (!text) return 0;
+      const cleaned = text
+        .replace(/rp/ig, "")
+        .replace(/,/g, "")
+        .replace(/\.(?=\d{3}(\D|$))/g, "")
+        .replace(/%/g, "")
+        .replace(/[^\d.-]/g, "");
+      const parsed = Number(cleaned);
+      return Number.isFinite(parsed) ? parsed : 0;
+    }
+
+    function normalizePid(value) {
+      const text = String(value ?? "").trim().replace(/\.0$/, "");
+      return /^\d+$/.test(text) ? text : "";
+    }
+
+    function findHeaderRow(matrix, requiredHeaders) {
+      const targets = requiredHeaders.map(normalizeHeader);
+      for (let i = 0; i < Math.min(matrix.length, 12); i += 1) {
+        const row = (matrix[i] || []).map(normalizeHeader);
+        if (targets.every((header) => row.includes(header))) return i;
+      }
+      return -1;
+    }
+
+    function rowsFromMatrix(matrix, headerRowIndex) {
+      const headers = matrix[headerRowIndex] || [];
+      const rows = [];
+      for (let i = headerRowIndex + 1; i < matrix.length; i += 1) {
+        const source = matrix[i] || [];
+        if (!source.some((cell) => String(cell ?? "").trim())) continue;
+        const row = {};
+        headers.forEach((header, index) => {
+          if (String(header ?? "").trim()) row[String(header)] = source[index] ?? "";
+        });
+        if (Object.keys(row).length) rows.push(row);
+      }
+      return rows;
+    }
+
+    function normalizeRow(row) {
+      const next = {};
+      Object.entries(row || {}).forEach(([key, value]) => {
+        next[normalizeHeader(key)] = value;
+      });
+      return next;
+    }
+
+    function inferBrand(sheetName, productName) {
+      const sheet = normalizeText(sheetName);
+      const product = normalizeText(productName);
+      if (sheet.includes("sparco")) return "Sparco";
+      if (sheet.includes("letme")) return "Letme";
+      if (sheet.includes("stypro")) return "Stypro";
+      if (sheet.includes("icyee")) return "Icyee";
+      if (product.includes("spar.co") || product.includes("sparco")) return "Sparco";
+      if (product.includes("let me") || product.includes("letme")) return "Letme";
+      if (product.includes("stypro")) return "Stypro";
+      if (product.includes("icyee")) return "Icyee";
+      return product ? "Other" : "Unknown";
+    }
+
+    function setStatus(node, level, text) {
+      node.className = `status-line ${level}`;
+      node.innerHTML = `<span class="status-dot"></span>${escapeHtml(text)}`;
+    }
+
+    function enableBuild() {
+      refs.buildBtn.disabled = !refs.productFile;
+      refs.resetDataBtn.disabled = !refs.productFile && !refs.lifecycleFile && !state.rows.length;
+    }
+
+    async function readWorkbook(file) {
+      const buffer = await file.arrayBuffer();
+      return XLSX.read(buffer, { type: "array" });
+    }
+
+    function extractLifecycleMap(workbook) {
+      const sheetName = workbook.SheetNames[0];
+      const sheet = workbook.Sheets[sheetName];
+      const matrix = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: "" });
+      const headerRowIndex = findHeaderRow(matrix, ["PID"]);
+      if (headerRowIndex < 0) return new Map();
+      const rows = rowsFromMatrix(matrix, headerRowIndex);
+      const map = new Map();
+      rows.forEach((source) => {
+        const row = normalizeRow(source);
+        const pid = normalizePid(row["pid"] || row["product id"]);
+        if (!pid) return;
+        map.set(pid, {
+          period: String(row["product period"] || row["产品阶段"] || row["period"] || "").trim(),
+          productNameCn: String(row["产品名"] || row["product name cn"] || "").trim(),
+          productNameRaw: String(row["product name"] || row["product name raw"] || "").trim()
+        });
+      });
+      return map;
+    }
+
+    function extractProductRows(workbook, lifecycleMap) {
+      const rows = [];
+      const periods = new Set();
+      const sheetNames = [...workbook.SheetNames];
+      let rawRows = 0;
+      let liveRows = 0;
+      let matchedLifecycle = 0;
+      let blankLifecycle = 0;
+      let unknownBrandRows = 0;
+
+      sheetNames.forEach((sheetName) => {
+        const sheet = workbook.Sheets[sheetName];
+        const matrix = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: "" });
+        const headerRowIndex = findHeaderRow(matrix, ["ID", "Product", "Status", "GMV"]);
+        if (headerRowIndex < 0) return;
+
+        const rangeLabel = String(matrix[0]?.[0] || "").trim();
+        if (rangeLabel) periods.add(rangeLabel);
+
+        rowsFromMatrix(matrix, headerRowIndex).forEach((source) => {
+          const row = normalizeRow(source);
+          const pid = normalizePid(row["id"] || row["pid"]);
+          const product = String(row["product"] || "").trim();
+          if (!pid && !product) return;
+          rawRows += 1;
+
+          const liveGmv = safeNumber(row["live gmv"]);
+          const liveItems = safeNumber(row["live items sold"]);
+          const liveImpressions = safeNumber(row["live impressions"]);
+          const livePageViews = safeNumber(row["page views from live"]);
+          const liveUniquePageViews = safeNumber(row["unique page views from live"]);
+          const liveUniqueCustomers = safeNumber(row["live unique product customers"]);
+          const liveCtr = safeNumber(row["live click-through rate"]);
+          const liveCvr = safeNumber(row["live conversion rate"]);
+
+          const hasLiveSignal = [
+            liveGmv,
+            liveItems,
+            liveImpressions,
+            livePageViews,
+            liveUniquePageViews,
+            liveUniqueCustomers
+          ].some((value) => value > 0);
+          if (!hasLiveSignal) return;
+          liveRows += 1;
+
+          const lifecycle = lifecycleMap.get(pid);
+          const brand = inferBrand(sheetName, product);
+          if (brand === "Unknown" || brand === "Other") unknownBrandRows += 1;
+          if (lifecycle) matchedLifecycle += 1;
+          if (lifecycle && !String(lifecycle.period || "").trim()) blankLifecycle += 1;
+
+          rows.push({
+            pid,
+            product,
+            brand,
+            sheetName,
+            status: String(row["status"] || "Unknown").trim() || "Unknown",
+            liveGmv,
+            liveItems,
+            liveImpressions,
+            livePageViews,
+            liveUniquePageViews,
+            liveUniqueCustomers,
+            liveCtr,
+            liveCvr,
+            lifecycle: lifecycle?.period ? lifecycle.period : lifecycle ? "未标注生命周期" : "未匹配生命周期",
+            productNameCn: lifecycle?.productNameCn || "",
+            lifecycleRawName: lifecycle?.productNameRaw || ""
+          });
+        });
+      });
+
+      return {
+        rows,
+        meta: {
+          periods: [...periods],
+          sheets: sheetNames,
+          rawRows,
+          liveRows,
+          matchedLifecycle,
+          blankLifecycle,
+          unknownBrandRows
+        }
+      };
+    }
+
+    function collectNotices(rows, meta) {
+      const notices = [];
+      const existingExpected = EXPECTED_SHEETS.filter((name) =>
+        meta.sheets.some((sheet) => normalizeText(sheet) === normalizeText(name))
+      );
+      const missingSheets = EXPECTED_SHEETS.filter((name) => !existingExpected.includes(name));
+      if (missingSheets.length) {
+        notices.push({
+          level: missingSheets.length >= 3 ? "risk" : "warn",
+          text: `直播底表当前只识别到 ${meta.sheets.length} 个工作表：${meta.sheets.join(" / ") || "无"}。预期品牌 sheet 缺少 ${missingSheets.join(" / ")}。`
+        });
+      }
+      const liveRowRate = meta.rawRows ? (meta.liveRows / meta.rawRows) * 100 : 0;
+      if (liveRowRate < 15) {
+        notices.push({
+          level: "warn",
+          text: `当前原始产品记录有 ${formatInt(meta.rawRows)} 条，但进入 LIVE 口径的只有 ${formatInt(meta.liveRows)} 条，占比 ${formatPct(liveRowRate)}。如果你预期直播成交很多，这里需要回头检查源表周期或直播字段是否完整。`
+        });
+      }
+      const matchedRate = rows.length ? (meta.matchedLifecycle / rows.length) * 100 : 0;
+      if (matchedRate < 20) {
+        notices.push({
+          level: "risk",
+          text: `当前生命周期命中率只有 ${formatPct(matchedRate)}，说明大部分直播产品还没有被底表 ` +
+            `PID -> 生命周期` + ` 映射覆盖。`
+        });
+      }
+      if (meta.blankLifecycle > 0) {
+        notices.push({
+          level: "warn",
+          text: `生命周期底表里有 ${formatInt(meta.blankLifecycle)} 条产品虽然 PID 命中了，但阶段字段为空，建议补全 product period。`
+        });
+      }
+      if (meta.unknownBrandRows > 0) {
+        notices.push({
+          level: "warn",
+          text: `有 ${formatInt(meta.unknownBrandRows)} 条产品未被标准品牌规则命中，系统已暂时归入 Other / Unknown，建议统一 sheet 名或产品名前缀。`
+        });
+      }
+      if (!notices.length) {
+        notices.push({ level: "ok", text: "数据结构完整，当前两张底表已经足够支撑第一版产品看板。" });
+      }
+      return notices;
+    }
+
+    function getSummary(rows, meta) {
+      const summary = {
+        totalRows: rows.length,
+        totalLiveGmv: 0,
+        totalLiveItems: 0,
+        totalLiveImpressions: 0,
+        totalLiveCustomers: 0,
+        activeCount: 0,
+        matchedLifecycleRate: rows.length ? (meta.matchedLifecycle / rows.length) * 100 : 0,
+        avgLiveGmvPerProduct: 0,
+        noSaleLiveProducts: 0
+      };
+
+      rows.forEach((row) => {
+        summary.totalLiveGmv += row.liveGmv;
+        summary.totalLiveItems += row.liveItems;
+        summary.totalLiveImpressions += row.liveImpressions;
+        summary.totalLiveCustomers += row.liveUniqueCustomers;
+        if (normalizeText(row.status) === "active") summary.activeCount += 1;
+        if (row.liveImpressions > 0 && row.liveGmv <= 0) summary.noSaleLiveProducts += 1;
+      });
+      summary.avgLiveGmvPerProduct = rows.length ? summary.totalLiveGmv / rows.length : 0;
+
+      return summary;
+    }
+
+    function buildRollup(rows, key) {
+      const map = new Map();
+      rows.forEach((row) => {
+        const bucket = row[key] || "Unknown";
+        if (!map.has(bucket)) {
+          map.set(bucket, {
+            name: bucket,
+            rows: 0,
+            liveGmv: 0,
+            liveItems: 0,
+            matched: 0
+          });
+        }
+        const item = map.get(bucket);
+        item.rows += 1;
+        item.liveGmv += row.liveGmv;
+        item.liveItems += row.liveItems;
+        if (row.lifecycle !== "未匹配生命周期") item.matched += 1;
+      });
+      return [...map.values()];
+    }
+
+    function renderStats(summary, meta) {
+      const cards = [
+        {
+          label: "LIVE 产品数",
+          value: formatInt(summary.totalRows),
+          note: `已读取 ${formatInt(meta.rawRows)} 条原始产品记录，其中 ${formatInt(summary.totalRows)} 条进入 LIVE 口径。`
+        },
+        {
+          label: "总 LIVE GMV",
+          value: formatRp(summary.totalLiveGmv),
+          note: "只统计直播字段 `LIVE GMV`，不再混入 Video / Shop Tab / Product Card。"
+        },
+        {
+          label: "总 LIVE 销量",
+          value: formatInt(summary.totalLiveItems),
+          note: "来自 `LIVE items sold`，用于看直播直接带动的件数。"
+        },
+        {
+          label: "LIVE 曝光",
+          value: formatInt(summary.totalLiveImpressions),
+          note: "来自 `LIVE impressions`，适合配合成交一起看流量效率。"
+        },
+        {
+          label: "LIVE 买家数",
+          value: formatInt(summary.totalLiveCustomers),
+          note: "来自 `LIVE unique product customers`，反映直播成交客数。"
+        },
+        {
+          label: "生命周期命中率",
+          value: formatPct(summary.matchedLifecycleRate),
+          note: "按进入 LIVE 口径的产品计算命中率，不是全量产品口径。"
+        }
+      ];
+
+      refs.statsGrid.innerHTML = cards.map((card) => `
+        <div class="panel stat-card">
+          <small>${escapeHtml(card.label)}</small>
+          <div class="value">${escapeHtml(card.value)}</div>
+          <div class="muted">${escapeHtml(card.note)}</div>
+        </div>
+      `).join("");
+    }
+
+    function renderBrandRollup(rows) {
+      const list = buildRollup(rows, "brand")
+        .sort((a, b) => {
+          const indexA = BRAND_ORDER.indexOf(a.name);
+          const indexB = BRAND_ORDER.indexOf(b.name);
+          if (indexA >= 0 && indexB >= 0 && indexA !== indexB) return indexA - indexB;
+          return b.liveGmv - a.liveGmv;
+        });
+
+      if (!list.length) {
+        refs.brandList.innerHTML = `<div class="empty">没有符合筛选条件的品牌数据。</div>`;
+        return;
+      }
+
+      const maxGmv = Math.max(...list.map((item) => item.liveGmv), 1);
+      refs.brandList.innerHTML = list.map((item) => `
+        <div class="bar-item">
+          <div class="bar-top">
+            <strong>${escapeHtml(item.name)}</strong>
+            <span class="muted">${formatRp(item.liveGmv)}</span>
+          </div>
+          <div class="muted">${formatInt(item.rows)} 个 LIVE 产品 · ${formatInt(item.liveItems)} 件 · 生命周期命中 ${formatPct(item.rows ? item.matched / item.rows * 100 : 0)}</div>
+          <div class="progress-track">
+            <div class="progress-fill" style="width:${item.liveGmv / maxGmv * 100}%"></div>
+          </div>
+        </div>
+      `).join("");
+    }
+
+    function renderLifecycleRollup(rows) {
+      const list = buildRollup(rows, "lifecycle").sort((a, b) => b.liveGmv - a.liveGmv);
+      if (!list.length) {
+        refs.lifecycleList.innerHTML = `<div class="empty">没有符合筛选条件的生命周期数据。</div>`;
+        return;
+      }
+      const maxLiveGmv = Math.max(...list.map((item) => item.liveGmv), 1);
+      const totalLiveGmv = list.reduce((sum, item) => sum + item.liveGmv, 0);
+      refs.lifecycleList.innerHTML = list.map((item) => `
+        <div class="bar-item">
+          <div class="bar-top">
+            <strong>${escapeHtml(item.name)}</strong>
+            <span class="muted">${formatPct(totalLiveGmv ? item.liveGmv / totalLiveGmv * 100 : 0)}</span>
+          </div>
+          <div class="muted">LIVE GMV ${formatRp(item.liveGmv)} · LIVE 销量 ${formatInt(item.liveItems)} · ${formatInt(item.rows)} 个产品</div>
+          <div class="progress-track">
+            <div class="progress-fill green" style="width:${item.liveGmv / maxLiveGmv * 100}%"></div>
+          </div>
+        </div>
+      `).join("");
+    }
+
+    function renderChannels(summary, rows, meta) {
+      const items = [
+        { name: "有成交 LIVE 产品", value: rows.filter((row) => row.liveGmv > 0).length, note: "LIVE GMV 大于 0 的产品数" },
+        { name: "有流量无成交", value: summary.noSaleLiveProducts, note: "有 LIVE 曝光但 LIVE GMV 仍为 0 的产品数" },
+        { name: "平均单品 LIVE GMV", value: summary.avgLiveGmvPerProduct, note: "按当前筛选后的 LIVE 产品均值计算" },
+        { name: "LIVE 渗透率", value: meta.rawRows ? (meta.liveRows / meta.rawRows) * 100 : 0, note: "进入 LIVE 口径的产品数 / 原始产品数" }
+      ];
+      const maxValue = Math.max(...items.map((item) => item.value), 1);
+      refs.channelList.innerHTML = items.map((item) => `
+        <div class="bar-item">
+          <div class="bar-top">
+            <strong>${escapeHtml(item.name)}</strong>
+            <span class="muted">${item.name.includes("率") ? formatPct(item.value) : item.name.includes("平均") ? formatRp(item.value) : formatInt(item.value)}</span>
+          </div>
+          <div class="muted">${escapeHtml(item.note)}</div>
+          <div class="progress-track">
+            <div class="progress-fill" style="width:${item.value / maxValue * 100}%"></div>
+          </div>
+        </div>
+      `).join("");
+    }
+
+    function renderRanks(rows) {
+      const topRows = [...rows].sort((a, b) => b.liveGmv - a.liveGmv).slice(0, 8);
+      const unmatched = [...rows]
+        .filter((row) => row.lifecycle === "未匹配生命周期")
+        .sort((a, b) => b.liveGmv - a.liveGmv)
+        .slice(0, 8);
+
+      refs.topProductList.innerHTML = topRows.length ? topRows.map((row, index) => `
+        <div class="rank-item">
+          <div class="rank-no">${index + 1}</div>
+          <div>
+            <div><strong>${escapeHtml(row.product)}</strong></div>
+            <div class="muted">${escapeHtml(row.brand)} · ${escapeHtml(row.lifecycle)} · LIVE 销量 ${formatInt(row.liveItems)}</div>
+          </div>
+          <div class="muted">${formatRp(row.liveGmv)}</div>
+        </div>
+      `).join("") : `<div class="empty">没有符合筛选条件的产品。</div>`;
+
+      refs.unmatchedList.innerHTML = unmatched.length ? unmatched.map((row, index) => `
+        <div class="rank-item">
+          <div class="rank-no">${index + 1}</div>
+          <div>
+            <div><strong>${escapeHtml(row.product)}</strong></div>
+            <div class="muted">${escapeHtml(row.brand)} · ${escapeHtml(row.sheetName)} · LIVE 销量 ${formatInt(row.liveItems)}</div>
+          </div>
+          <div class="muted">${formatRp(row.liveGmv)}</div>
+        </div>
+      `).join("") : `<div class="empty">当前筛选下没有未匹配生命周期的产品。</div>`;
+    }
+
+    function renderHealth(rows, meta) {
+      const health = [
+        {
+          title: "直播底表工作表",
+          value: `${formatInt(meta.sheets.length)} 个`,
+          detail: `已识别工作表：${meta.sheets.join(" / ") || "无"}`
+        },
+        {
+          title: "原始产品数",
+          value: formatInt(meta.rawRows),
+          detail: "这是直播底表中被识别出的产品总记录数。"
+        },
+        {
+          title: "进入 LIVE 口径",
+          value: formatInt(meta.liveRows),
+          detail: "只保留至少有一项 LIVE 信号的产品，例如 LIVE GMV、LIVE 曝光或 LIVE 页面浏览。"
+        },
+        {
+          title: "生命周期 PID 数",
+          value: formatInt(state.lifecycleMap.size),
+          detail: "来自生命周期表的可用 PID 数。"
+        },
+        {
+          title: "生命周期命中数",
+          value: formatInt(meta.matchedLifecycle),
+          detail: `在 ${formatInt(rows.length)} 条直播产品记录里，命中了 ${formatInt(meta.matchedLifecycle)} 条。`
+        },
+        {
+          title: "阶段为空",
+          value: formatInt(meta.blankLifecycle),
+          detail: "说明 PID 命中了，但 product period 为空。"
+        }
+      ];
+      refs.healthList.innerHTML = health.map((item) => `
+        <div class="item">
+          <div class="item-top">
+            <strong>${escapeHtml(item.title)}</strong>
+            <span class="muted">${escapeHtml(item.value)}</span>
+          </div>
+          <div class="muted">${escapeHtml(item.detail)}</div>
+        </div>
+      `).join("");
+    }
+
+    function renderNotices(notices) {
+      refs.noticeList.innerHTML = notices.map((notice) => `
+        <div class="notice ${notice.level === "ok" ? "" : notice.level}">
+          ${escapeHtml(notice.text)}
+        </div>
+      `).join("");
+      refs.heroNotices.innerHTML = notices.slice(0, 2).map((notice) => `
+        <div class="notice ${notice.level === "ok" ? "" : notice.level}">
+          ${escapeHtml(notice.text)}
+        </div>
+      `).join("");
+    }
+
+    function renderTable(rows) {
+      if (!rows.length) {
+        refs.detailTable.innerHTML = `<tr><td colspan="14"><div class="empty">当前筛选条件下没有产品记录。</div></td></tr>`;
+        refs.tableMeta.textContent = "0 条结果。";
+        return;
+      }
+      refs.detailTable.innerHTML = rows.map((row) => `
+        <tr>
+          <td>${escapeHtml(row.brand)}</td>
+          <td>${escapeHtml(row.sheetName)}</td>
+          <td>${escapeHtml(row.pid || "-")}</td>
+          <td class="product-cell">${escapeHtml(row.product)}</td>
+          <td>${escapeHtml(row.lifecycle)}</td>
+          <td>${escapeHtml(row.status)}</td>
+          <td>${formatInt(row.liveItems)}</td>
+          <td>${formatRp(row.liveGmv)}</td>
+          <td>${formatInt(row.liveImpressions)}</td>
+          <td>${formatInt(row.livePageViews)}</td>
+          <td>${formatInt(row.liveUniquePageViews)}</td>
+          <td>${formatInt(row.liveUniqueCustomers)}</td>
+          <td>${formatPct(row.liveCtr)}</td>
+          <td>${formatPct(row.liveCvr)}</td>
+        </tr>
+      `).join("");
+      refs.tableMeta.textContent = `当前显示 ${formatInt(rows.length)} 条产品记录。`;
+    }
+
+    function populateFilters(rows) {
+      const unique = (getter) => [...new Set(rows.map(getter).filter(Boolean))];
+      const brandOptions = unique((row) => row.brand).sort((a, b) => BRAND_ORDER.indexOf(a) - BRAND_ORDER.indexOf(b));
+      const lifecycleOptions = unique((row) => row.lifecycle).sort((a, b) => a.localeCompare(b, "zh-CN"));
+      const statusOptions = unique((row) => row.status).sort((a, b) => a.localeCompare(b, "en"));
+
+      refs.brandFilter.innerHTML = `<option value="">全部品牌</option>${brandOptions.map((value) => `<option value="${escapeHtml(value)}">${escapeHtml(value)}</option>`).join("")}`;
+      refs.periodFilter.innerHTML = `<option value="">全部生命周期</option>${lifecycleOptions.map((value) => `<option value="${escapeHtml(value)}">${escapeHtml(value)}</option>`).join("")}`;
+      refs.statusFilter.innerHTML = `<option value="">全部状态</option>${statusOptions.map((value) => `<option value="${escapeHtml(value)}">${escapeHtml(value)}</option>`).join("")}`;
+
+      [refs.brandFilter, refs.periodFilter, refs.statusFilter, refs.keywordFilter, refs.resetFilterBtn].forEach((node) => {
+        node.disabled = false;
+      });
+    }
+
+    function applyFilters() {
+      const brand = refs.brandFilter.value;
+      const lifecycle = refs.periodFilter.value;
+      const status = refs.statusFilter.value;
+      const keyword = normalizeText(refs.keywordFilter.value);
+
+      state.filteredRows = state.rows
+        .filter((row) => !brand || row.brand === brand)
+        .filter((row) => !lifecycle || row.lifecycle === lifecycle)
+        .filter((row) => !status || row.status === status)
+        .filter((row) => {
+          if (!keyword) return true;
+          return [
+            row.product,
+            row.pid,
+            row.brand,
+            row.sheetName,
+            row.lifecycle,
+            row.productNameCn
+          ].some((value) => normalizeText(value).includes(keyword));
+        })
+        .sort((a, b) => b.liveGmv - a.liveGmv);
+
+      const summary = getSummary(state.filteredRows, {
+        ...state.meta,
+        matchedLifecycle: state.filteredRows.filter((row) => row.lifecycle !== "未匹配生命周期").length
+      });
+
+      renderStats(summary, state.meta);
+      renderBrandRollup(state.filteredRows);
+      renderLifecycleRollup(state.filteredRows);
+      renderChannels(summary, state.filteredRows, state.meta);
+      renderRanks(state.filteredRows);
+      renderTable(state.filteredRows);
+    }
+
+    async function buildDashboard() {
+      if (!refs.productWorkbook.files[0]) return;
+
+      refs.buildBtn.disabled = true;
+      refs.buildBtn.textContent = "生成中...";
+
+      try {
+        const productWorkbook = await readWorkbook(refs.productWorkbook.files[0]);
+        const lifecycleWorkbook = refs.lifecycleWorkbook.files[0]
+          ? await readWorkbook(refs.lifecycleWorkbook.files[0])
+          : null;
+
+        state.lifecycleMap = lifecycleWorkbook ? extractLifecycleMap(lifecycleWorkbook) : new Map();
+        const { rows, meta } = extractProductRows(productWorkbook, state.lifecycleMap);
+
+        state.rows = rows.sort((a, b) => b.liveGmv - a.liveGmv);
+        state.meta = meta;
+        state.notices = collectNotices(state.rows, state.meta);
+        state.filteredRows = [...state.rows];
+
+        refs.periodLabel.textContent = meta.periods[0] || "未识别周期";
+
+        populateFilters(state.rows);
+        renderNotices(state.notices);
+        renderHealth(state.rows, state.meta);
+        applyFilters();
+      } catch (error) {
+        refs.heroNotices.innerHTML = `<div class="notice risk">文件解析失败：${escapeHtml(error.message || String(error))}</div>`;
+      } finally {
+        refs.buildBtn.disabled = false;
+        refs.buildBtn.textContent = "生成看板";
+        refs.resetDataBtn.disabled = false;
+      }
+    }
+
+    function resetAll() {
+      state.rows = [];
+      state.filteredRows = [];
+      state.lifecycleMap = new Map();
+      state.notices = [];
+      state.meta = {
+        periods: [],
+        sheets: [],
+        rawRows: 0,
+        liveRows: 0,
+        matchedLifecycle: 0,
+        blankLifecycle: 0,
+        unknownBrandRows: 0
+      };
+
+      refs.productWorkbook.value = "";
+      refs.lifecycleWorkbook.value = "";
+      refs.periodLabel.textContent = "等待上传";
+      refs.statsGrid.innerHTML = "";
+      refs.brandList.innerHTML = `<div class="empty">上传 Excel 后显示。</div>`;
+      refs.lifecycleList.innerHTML = `<div class="empty">上传 Excel 后显示。</div>`;
+      refs.channelList.innerHTML = `<div class="empty">上传 Excel 后显示。</div>`;
+      refs.topProductList.innerHTML = `<div class="empty">上传 Excel 后显示。</div>`;
+      refs.unmatchedList.innerHTML = `<div class="empty">上传 Excel 后显示。</div>`;
+      refs.healthList.innerHTML = `<div class="empty">上传 Excel 后显示。</div>`;
+      refs.noticeList.innerHTML = `<div class="empty">上传 Excel 后显示。</div>`;
+      refs.heroNotices.innerHTML = `<div class="notice">上传后会自动检测是否真的包含 \`Sparco / Letme / Stypro / Icyee\` 四个工作表。如果缺失，页面会保留可用数据，但同时在健康度里提示缺口。</div>`;
+      refs.detailTable.innerHTML = `<tr><td colspan="14"><div class="empty">上传 Excel 后显示。</div></td></tr>`;
+      refs.tableMeta.textContent = "当前没有数据。";
+
+      [refs.brandFilter, refs.periodFilter, refs.statusFilter, refs.keywordFilter, refs.resetFilterBtn].forEach((node) => {
+        node.disabled = true;
+      });
+      refs.brandFilter.innerHTML = `<option value="">全部品牌</option>`;
+      refs.periodFilter.innerHTML = `<option value="">全部生命周期</option>`;
+      refs.statusFilter.innerHTML = `<option value="">全部状态</option>`;
+      refs.keywordFilter.value = "";
+
+      setStatus(refs.productStatus, "", "等待上传");
+      setStatus(refs.lifecycleStatus, "", "等待上传");
+      refs.buildBtn.disabled = true;
+      refs.resetDataBtn.disabled = true;
+    }
+
+    refs.productWorkbook.addEventListener("change", () => {
+      refs.productFile = refs.productWorkbook.files[0] || null;
+      if (refs.productFile) {
+        setStatus(refs.productStatus, "ok", `已选择 ${refs.productFile.name}`);
+      } else {
+        setStatus(refs.productStatus, "", "等待上传");
+      }
+      enableBuild();
+    });
+
+    refs.lifecycleWorkbook.addEventListener("change", () => {
+      refs.lifecycleFile = refs.lifecycleWorkbook.files[0] || null;
+      if (refs.lifecycleFile) {
+        setStatus(refs.lifecycleStatus, "ok", `已选择 ${refs.lifecycleFile.name}`);
+      } else {
+        setStatus(refs.lifecycleStatus, "", "等待上传");
+      }
+      enableBuild();
+    });
+
+    refs.buildBtn.addEventListener("click", buildDashboard);
+    refs.resetDataBtn.addEventListener("click", resetAll);
+    refs.resetFilterBtn.addEventListener("click", () => {
+      refs.brandFilter.value = "";
+      refs.periodFilter.value = "";
+      refs.statusFilter.value = "";
+      refs.keywordFilter.value = "";
+      applyFilters();
+    });
+
+    [refs.brandFilter, refs.periodFilter, refs.statusFilter].forEach((node) => {
+      node.addEventListener("change", applyFilters);
+    });
+    refs.keywordFilter.addEventListener("input", applyFilters);
+
+    resetAll();
+  </script>
+</body>
+</html>
