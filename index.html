@@ -314,7 +314,8 @@
 
     input[type="search"],
     input[type="date"],
-    select {
+    select,
+    .multi-select-summary {
       width: 100%;
       padding: 12px 14px;
       border-radius: 12px;
@@ -323,9 +324,67 @@
       color: var(--ink);
     }
 
-    select[multiple] {
-      min-height: 116px;
+    .multi-select {
+      position: relative;
+    }
+
+    .multi-select[open] {
+      z-index: 20;
+    }
+
+    .multi-select-summary {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      cursor: pointer;
+      list-style: none;
+      min-height: 46px;
+    }
+
+    .multi-select-summary::-webkit-details-marker {
+      display: none;
+    }
+
+    .multi-select-summary::after {
+      content: "展开";
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 700;
+    }
+
+    .multi-select[open] .multi-select-summary::after {
+      content: "收起";
+    }
+
+    .multi-select-panel {
+      position: absolute;
+      top: calc(100% + 8px);
+      left: 0;
+      right: 0;
+      max-height: 240px;
+      overflow: auto;
       padding: 10px;
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      background: white;
+      box-shadow: var(--shadow);
+    }
+
+    .multi-select-option {
+      display: flex;
+      align-items: flex-start;
+      gap: 10px;
+      padding: 8px 6px;
+      border-radius: 10px;
+      cursor: pointer;
+    }
+
+    .multi-select-option:hover {
+      background: rgba(204, 100, 41, 0.06);
+    }
+
+    .multi-select-option input {
+      margin-top: 2px;
     }
 
     .table-wrap {
@@ -608,9 +667,18 @@
 
       <div class="filter-grid">
         <input id="searchInput" type="search" placeholder="搜索达人 / 产品 / 视频 / PID" disabled>
-        <select id="brandFilter" multiple size="4" disabled title="品牌多选，按住 Command 或 Shift 可连续选择"></select>
-        <select id="levelFilter" multiple size="4" disabled title="达人等级多选，按住 Command 或 Shift 可连续选择"></select>
-        <select id="periodFilter" multiple size="4" disabled title="产品阶段多选，按住 Command 或 Shift 可连续选择"></select>
+        <details id="brandFilter" class="multi-select">
+          <summary id="brandFilterSummary" class="multi-select-summary">全部品牌</summary>
+          <div id="brandFilterOptions" class="multi-select-panel"></div>
+        </details>
+        <details id="levelFilter" class="multi-select">
+          <summary id="levelFilterSummary" class="multi-select-summary">全部达人等级</summary>
+          <div id="levelFilterOptions" class="multi-select-panel"></div>
+        </details>
+        <details id="periodFilter" class="multi-select">
+          <summary id="periodFilterSummary" class="multi-select-summary">全部产品阶段</summary>
+          <div id="periodFilterOptions" class="multi-select-panel"></div>
+        </details>
         <input id="startDateFilter" type="date" disabled>
         <input id="endDateFilter" type="date" disabled>
         <button id="resetBtn" class="secondary" disabled>重置筛选</button>
@@ -716,8 +784,14 @@
       nextPageBtn: document.getElementById("nextPageBtn"),
       searchInput: document.getElementById("searchInput"),
       brandFilter: document.getElementById("brandFilter"),
+      brandFilterSummary: document.getElementById("brandFilterSummary"),
+      brandFilterOptions: document.getElementById("brandFilterOptions"),
       levelFilter: document.getElementById("levelFilter"),
+      levelFilterSummary: document.getElementById("levelFilterSummary"),
+      levelFilterOptions: document.getElementById("levelFilterOptions"),
       periodFilter: document.getElementById("periodFilter"),
+      periodFilterSummary: document.getElementById("periodFilterSummary"),
+      periodFilterOptions: document.getElementById("periodFilterOptions"),
       startDateFilter: document.getElementById("startDateFilter"),
       endDateFilter: document.getElementById("endDateFilter"),
       resetBtn: document.getElementById("resetBtn"),
@@ -1568,22 +1642,37 @@
             : state.merged.linkageRows;
     }
 
-    function getSelectedValues(selectNode) {
-      return [...selectNode.selectedOptions].map((option) => option.value).filter(Boolean);
+    function getSelectedValues(containerNode) {
+      return [...containerNode.querySelectorAll('input[type="checkbox"]:checked')].map((input) => input.value).filter(Boolean);
     }
 
-    function clearMultiSelect(selectNode) {
-      [...selectNode.options].forEach((option) => {
-        option.selected = false;
+    function clearMultiSelect(containerNode) {
+      [...containerNode.querySelectorAll('input[type="checkbox"]')].forEach((input) => {
+        input.checked = false;
       });
+    }
+
+    function buildMultiSelectOptions(options, selectedValues, groupName) {
+      return options.length
+        ? options.map((value) => `
+            <label class="multi-select-option">
+              <input type="checkbox" name="${groupName}" value="${escapeHtml(value)}" ${selectedValues.includes(value) ? "checked" : ""}>
+              <span>${escapeHtml(value)}</span>
+            </label>
+          `).join("")
+        : `<div class="mini">暂无可选项</div>`;
+    }
+
+    function updateMultiSelectSummary(summaryNode, selectedValues, placeholder) {
+      summaryNode.textContent = selectedValues.length ? selectedValues.join("、") : placeholder;
     }
 
     function getFilterState() {
       return {
         keyword: normalizeText(refs.searchInput.value),
-        brands: getSelectedValues(refs.brandFilter),
-        levels: getSelectedValues(refs.levelFilter),
-        periods: getSelectedValues(refs.periodFilter),
+        brands: getSelectedValues(refs.brandFilterOptions),
+        levels: getSelectedValues(refs.levelFilterOptions),
+        periods: getSelectedValues(refs.periodFilterOptions),
         startDate: refs.startDateFilter.value,
         endDate: refs.endDateFilter.value
       };
@@ -2198,9 +2287,9 @@
     }
 
     function renderFilterOptions(rows) {
-      const selectedBrands = getSelectedValues(refs.brandFilter);
-      const selectedLevels = getSelectedValues(refs.levelFilter);
-      const selectedPeriods = getSelectedValues(refs.periodFilter);
+      const selectedBrands = getSelectedValues(refs.brandFilterOptions);
+      const selectedLevels = getSelectedValues(refs.levelFilterOptions);
+      const selectedPeriods = getSelectedValues(refs.periodFilterOptions);
       const brands = [...new Set([...BRANDS.map((brand) => brand.toUpperCase()), ...rows.map((row) => row.brand).filter(Boolean)])].sort();
       const levels = (state.currentView === "lifecycle" || state.currentView === "refund")
         ? [...new Set(
@@ -2216,9 +2305,12 @@
       const periods = (state.currentView === "refund")
         ? [...new Set(state.merged.transactionRows.map((row) => row.product_period).filter(Boolean))].sort()
         : [...new Set(rows.map((row) => row.product_period).filter(Boolean))].sort();
-      refs.brandFilter.innerHTML = brands.map((brand) => `<option value="${brand}" ${selectedBrands.includes(brand) ? "selected" : ""}>${brand}</option>`).join("");
-      refs.levelFilter.innerHTML = levels.map((level) => `<option value="${level}" ${selectedLevels.includes(level) ? "selected" : ""}>${level}</option>`).join("");
-      refs.periodFilter.innerHTML = periods.map((period) => `<option value="${period}" ${selectedPeriods.includes(period) ? "selected" : ""}>${period}</option>`).join("");
+      refs.brandFilterOptions.innerHTML = buildMultiSelectOptions(brands, selectedBrands, "brand-filter");
+      refs.levelFilterOptions.innerHTML = buildMultiSelectOptions(levels, selectedLevels, "level-filter");
+      refs.periodFilterOptions.innerHTML = buildMultiSelectOptions(periods, selectedPeriods, "period-filter");
+      updateMultiSelectSummary(refs.brandFilterSummary, selectedBrands, "全部品牌");
+      updateMultiSelectSummary(refs.levelFilterSummary, selectedLevels, "全部达人等级");
+      updateMultiSelectSummary(refs.periodFilterSummary, selectedPeriods, "全部产品阶段");
       enableControls();
     }
 
@@ -2490,16 +2582,19 @@
     refs.processBtn.addEventListener("click", handleProcess);
     refs.downloadBtn.addEventListener("click", downloadCurrentCsv);
     refs.searchInput.addEventListener("input", applyFilters);
-    refs.brandFilter.addEventListener("change", applyFilters);
-    refs.levelFilter.addEventListener("change", applyFilters);
-    refs.periodFilter.addEventListener("change", applyFilters);
+    refs.brandFilterOptions.addEventListener("change", applyFilters);
+    refs.levelFilterOptions.addEventListener("change", applyFilters);
+    refs.periodFilterOptions.addEventListener("change", applyFilters);
     refs.startDateFilter.addEventListener("change", applyFilters);
     refs.endDateFilter.addEventListener("change", applyFilters);
     refs.resetBtn.addEventListener("click", () => {
       refs.searchInput.value = "";
-      clearMultiSelect(refs.brandFilter);
-      clearMultiSelect(refs.levelFilter);
-      clearMultiSelect(refs.periodFilter);
+      clearMultiSelect(refs.brandFilterOptions);
+      clearMultiSelect(refs.levelFilterOptions);
+      clearMultiSelect(refs.periodFilterOptions);
+      updateMultiSelectSummary(refs.brandFilterSummary, [], "全部品牌");
+      updateMultiSelectSummary(refs.levelFilterSummary, [], "全部达人等级");
+      updateMultiSelectSummary(refs.periodFilterSummary, [], "全部产品阶段");
       refs.startDateFilter.value = "";
       refs.endDateFilter.value = "";
       applyFilters();
