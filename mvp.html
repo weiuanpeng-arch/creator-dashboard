@@ -1,0 +1,2504 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>达人数据监控后台 MVP</title>
+  <script src="https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js"></script>
+  <style>
+    :root {
+      --bg: #f4eee5;
+      --panel: rgba(255, 250, 243, 0.96);
+      --line: rgba(91, 68, 46, 0.12);
+      --ink: #2d241d;
+      --muted: #716558;
+      --accent: #cc6429;
+      --accent-soft: rgba(204, 100, 41, 0.12);
+      --green: #5d7650;
+      --green-soft: rgba(93, 118, 80, 0.12);
+      --gold: #aa7422;
+      --gold-soft: rgba(170, 116, 34, 0.12);
+      --shadow: 0 18px 44px rgba(72, 55, 39, 0.1);
+      --radius: 22px;
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      font-family: "Avenir Next", "PingFang SC", "Microsoft YaHei", sans-serif;
+      color: var(--ink);
+      background:
+        radial-gradient(circle at top left, rgba(204, 100, 41, 0.1), transparent 24%),
+        radial-gradient(circle at top right, rgba(93, 118, 80, 0.08), transparent 24%),
+        linear-gradient(180deg, #fcf9f4 0%, var(--bg) 100%);
+    }
+
+    .shell {
+      width: min(1480px, calc(100% - 24px));
+      margin: 16px auto 36px;
+    }
+
+    .panel {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      box-shadow: var(--shadow);
+    }
+
+    .hero,
+    .card,
+    .table-panel {
+      padding: 22px;
+    }
+
+    .hero {
+      display: grid;
+      gap: 18px;
+    }
+
+    .hero-top,
+    .panel-header,
+    .filters,
+    .footer-actions,
+    .pagination {
+      display: flex;
+      justify-content: space-between;
+      gap: 12px;
+      align-items: center;
+      flex-wrap: wrap;
+    }
+
+    .eyebrow,
+    .tag,
+    .pill,
+    .status {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 8px 12px;
+      border-radius: 999px;
+      font-size: 12px;
+      font-weight: 800;
+    }
+
+    .eyebrow,
+    .tag,
+    .pill {
+      background: var(--accent-soft);
+      color: var(--accent);
+    }
+
+    .pill.green,
+    .status.ready {
+      background: var(--green-soft);
+      color: var(--green);
+    }
+
+    .pill.warn {
+      background: var(--gold-soft);
+      color: var(--gold);
+    }
+
+    .status.wait {
+      background: rgba(255, 255, 255, 0.78);
+      color: var(--muted);
+      border: 1px solid var(--line);
+    }
+
+    .status.warn {
+      background: var(--gold-soft);
+      color: var(--gold);
+    }
+
+    .dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: currentColor;
+    }
+
+    h1, h2, h3, p {
+      margin: 0;
+    }
+
+    h1 {
+      margin-top: 10px;
+      font-size: clamp(30px, 4vw, 44px);
+      letter-spacing: -0.04em;
+    }
+
+    .hero p,
+    .panel-header p,
+    .mini {
+      color: var(--muted);
+      line-height: 1.65;
+      font-size: 13px;
+    }
+
+    .hero-actions,
+    .tabs,
+    .pagination-actions {
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+      align-items: center;
+    }
+
+    button,
+    .button-like {
+      appearance: none;
+      border: 0;
+      border-radius: 14px;
+      padding: 12px 16px;
+      font-weight: 800;
+      cursor: pointer;
+      background: var(--accent);
+      color: white;
+    }
+
+    button.secondary {
+      background: rgba(255, 255, 255, 0.86);
+      color: var(--ink);
+      border: 1px solid var(--line);
+    }
+
+    .tab-btn {
+      background: rgba(255, 255, 255, 0.82);
+      color: var(--ink);
+      border: 1px solid var(--line);
+    }
+
+    .tab-btn.active {
+      background: var(--accent);
+      color: white;
+      border-color: transparent;
+    }
+
+    button:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+
+    .upload-grid,
+    .stats-grid,
+    .split-2,
+    .split-3,
+    .filter-grid {
+      display: grid;
+      gap: 16px;
+      margin-top: 16px;
+    }
+
+    .upload-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+    .stats-grid { grid-template-columns: repeat(6, minmax(0, 1fr)); }
+    .split-2 { grid-template-columns: 1.15fr 1fr; }
+    .split-3 { grid-template-columns: 1fr 1fr 1fr; }
+    .filter-grid { grid-template-columns: 1.4fr 1fr 1fr 1fr auto; }
+
+    .upload-card,
+    .list-item,
+    .rank-item {
+      background: white;
+      border: 1px solid var(--line);
+      border-radius: 18px;
+    }
+
+    .upload-card {
+      padding: 18px;
+      display: grid;
+      gap: 10px;
+    }
+
+    .upload-card input {
+      width: 100%;
+      padding: 10px 12px;
+      border-radius: 12px;
+      border: 1px dashed rgba(91, 68, 46, 0.18);
+      background: #fffdfa;
+    }
+
+    .stat-card small {
+      display: block;
+      margin-bottom: 14px;
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    .stat-card .value {
+      font-size: 30px;
+      font-weight: 800;
+      letter-spacing: -0.04em;
+      margin-bottom: 6px;
+    }
+
+    .stat-card .note {
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.6;
+    }
+
+    .list,
+    .rank-grid {
+      display: grid;
+      gap: 10px;
+    }
+
+    .list-item {
+      padding: 14px;
+      display: grid;
+      gap: 6px;
+    }
+
+    .rank-item {
+      padding: 12px;
+      display: grid;
+      grid-template-columns: 34px 1fr auto;
+      gap: 10px;
+      align-items: center;
+    }
+
+    .rank-no {
+      width: 30px;
+      height: 30px;
+      border-radius: 10px;
+      display: grid;
+      place-items: center;
+      background: var(--accent-soft);
+      color: var(--accent);
+      font-size: 12px;
+      font-weight: 800;
+    }
+
+    .trend-chart {
+      display: flex;
+      align-items: end;
+      gap: 10px;
+      min-height: 250px;
+      overflow-x: auto;
+      padding-top: 6px;
+    }
+
+    .bar-group {
+      min-width: 42px;
+      display: grid;
+      gap: 8px;
+      justify-items: center;
+    }
+
+    .bar-stack {
+      height: 210px;
+      display: flex;
+      gap: 6px;
+      align-items: end;
+    }
+
+    .bar {
+      width: 14px;
+      border-radius: 999px 999px 0 0;
+    }
+
+    .bar.primary { background: linear-gradient(180deg, #e1b283, var(--accent)); }
+    .bar.secondary { background: linear-gradient(180deg, #97b184, var(--green)); }
+
+    .bar-label {
+      color: var(--muted);
+      font-size: 11px;
+    }
+
+    input[type="search"],
+    input[type="date"],
+    select {
+      width: 100%;
+      padding: 12px 14px;
+      border-radius: 12px;
+      border: 1px solid var(--line);
+      background: white;
+      color: var(--ink);
+    }
+
+    .table-wrap {
+      overflow: auto;
+      max-height: 520px;
+      margin-top: 12px;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 13px;
+    }
+
+    th,
+    td {
+      text-align: left;
+      padding: 12px 10px;
+      border-bottom: 1px solid rgba(91, 68, 46, 0.08);
+      vertical-align: top;
+    }
+
+    th {
+      color: var(--muted);
+      font-size: 11px;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+    }
+
+    .cell-details {
+      min-width: 240px;
+      max-width: 360px;
+    }
+
+    .cell-details summary {
+      cursor: pointer;
+      list-style: none;
+      color: var(--ink);
+      font-weight: 700;
+    }
+
+    .cell-details summary::-webkit-details-marker {
+      display: none;
+    }
+
+    .cell-details summary::after {
+      content: "展开";
+      display: inline-flex;
+      margin-left: 8px;
+      padding: 2px 8px;
+      border-radius: 999px;
+      background: var(--accent-soft);
+      color: var(--accent);
+      font-size: 11px;
+      font-weight: 800;
+      vertical-align: middle;
+    }
+
+    .cell-details[open] summary::after {
+      content: "收起";
+    }
+
+    .cell-details .full-text {
+      margin-top: 8px;
+      color: var(--muted);
+      line-height: 1.6;
+      white-space: normal;
+      word-break: break-word;
+    }
+
+    .detail-list {
+      display: grid;
+      gap: 8px;
+      margin-top: 8px;
+    }
+
+    .detail-row {
+      padding: 10px 12px;
+      border-radius: 12px;
+      background: rgba(255, 255, 255, 0.78);
+      border: 1px solid rgba(91, 68, 46, 0.08);
+    }
+
+    .detail-row strong {
+      display: block;
+      margin-bottom: 4px;
+    }
+
+    .sub-metric {
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.6;
+    }
+
+    .empty {
+      padding: 18px;
+      border-radius: 16px;
+      border: 1px dashed rgba(91, 68, 46, 0.18);
+      background: rgba(255, 255, 255, 0.74);
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    .hidden { display: none; }
+
+    @media (max-width: 1200px) {
+      .upload-grid,
+      .stats-grid,
+      .split-2,
+      .split-3,
+      .filter-grid {
+        grid-template-columns: 1fr 1fr;
+      }
+    }
+
+    @media (max-width: 720px) {
+      .shell { width: min(100% - 14px, 100%); }
+      .upload-grid,
+      .stats-grid,
+      .split-2,
+      .split-3,
+      .filter-grid {
+        grid-template-columns: 1fr;
+      }
+      .hero,
+      .card,
+      .table-panel {
+        padding: 16px;
+      }
+      .table-wrap { max-height: 360px; }
+    }
+  </style>
+</head>
+<body>
+  <div class="shell">
+    <section class="panel hero">
+      <div class="hero-top">
+        <div>
+          <div class="eyebrow">4 Brands / 4 Data Types / v2</div>
+          <h1>达人数据监控后台 MVP</h1>
+          <p>支持 `Sparco / letme / icyee / stypro` 多品牌多文件上传。系统会先按文件类型自动拼接，再分别构建“交易监控”“播放监控”“播放-交易联动分析”三个视图。</p>
+        </div>
+        <div class="hero-actions">
+          <button id="processBtn" disabled>生成监控结果</button>
+          <button id="downloadBtn" class="secondary" disabled>下载当前视图 CSV</button>
+        </div>
+      </div>
+
+      <div class="upload-grid">
+        <div class="upload-card">
+          <strong>1. 交易归因表</strong>
+          <div class="mini">可一次上传 4 个品牌文件。主键粒度按 `Video ID + Product ID` 理解。</div>
+          <input id="transactionFiles" type="file" accept=".xlsx,.xls" multiple>
+          <div class="status wait" id="transactionStatus"><span class="dot"></span>等待上传</div>
+        </div>
+        <div class="upload-card">
+          <strong>2. 播放表现表</strong>
+          <div class="mini">可一次上传 4 个品牌文件。用于看 VV、互动、CTR、完播率等内容指标。</div>
+          <input id="performanceFiles" type="file" accept=".xlsx,.xls" multiple>
+          <div class="status wait" id="performanceStatus"><span class="dot"></span>等待上传</div>
+        </div>
+        <div class="upload-card">
+          <strong>3. 产品生命周期表</strong>
+          <div class="mini">支持多文件拼接。通过 `PID` 补产品阶段、中文名、原始品名。</div>
+          <input id="lifecycleFiles" type="file" accept=".xlsx,.xls" multiple>
+          <div class="status wait" id="lifecycleStatus"><span class="dot"></span>等待上传</div>
+        </div>
+        <div class="upload-card">
+          <strong>4. 达人等级表</strong>
+          <div class="mini">支持多文件拼接。通过 `Creator name` 补达人等级，未命中默认 `L3`。</div>
+          <input id="creatorFiles" type="file" accept=".xlsx,.xls" multiple>
+          <div class="status wait" id="creatorStatus"><span class="dot"></span>等待上传</div>
+        </div>
+      </div>
+    </section>
+
+    <section class="panel card" style="margin-top:16px;">
+      <div class="tabs">
+        <button class="tab-btn active" data-view="transaction">交易监控</button>
+        <button class="tab-btn" data-view="performance">播放监控</button>
+        <button class="tab-btn" data-view="lifecycle">生命周期看板</button>
+        <button class="tab-btn" data-view="refund">Refund 监控</button>
+        <button class="tab-btn" data-view="linkage">联动分析</button>
+      </div>
+      <div class="mini" id="viewHint" style="margin-top:12px;">当前视图：交易归因口径，适合看 GMV、订单、达人带货产出和产品阶段表现。</div>
+    </section>
+
+    <section class="stats-grid" id="statsSection"></section>
+
+    <section class="split-3">
+      <div class="panel card">
+        <div class="panel-header">
+          <div>
+            <h2>接入状态</h2>
+            <p>看这 4 类文件是否已成功拼接，并且能不能进入当前视图。</p>
+          </div>
+          <div class="tag">数据健康度</div>
+        </div>
+        <div class="list" id="healthList">
+          <div class="empty">上传文件后显示。</div>
+        </div>
+      </div>
+
+      <div class="panel card">
+        <div class="panel-header">
+          <div>
+            <h2 id="issueTitle">待处理问题</h2>
+            <p id="issueDesc">根据当前视图展示最优先处理的问题列表。</p>
+          </div>
+          <div class="tag">优先处理</div>
+        </div>
+        <div class="list" id="issueList">
+          <div class="empty">上传文件后显示。</div>
+        </div>
+      </div>
+
+      <div class="panel card">
+        <div class="panel-header">
+          <div>
+            <h2>运营动作</h2>
+            <p>看完数据后最应该推进的动作。</p>
+          </div>
+          <div class="tag">今日建议</div>
+        </div>
+        <div class="list" id="actionList">
+          <div class="empty">上传文件后显示。</div>
+        </div>
+      </div>
+    </section>
+
+    <section class="split-3">
+      <div class="panel card">
+        <div class="panel-header">
+          <div>
+            <h2>趋势</h2>
+            <p id="trendDesc">按当前视图的核心指标绘制近 14 天趋势。</p>
+          </div>
+          <div class="tag" id="trendTag">趋势图</div>
+        </div>
+        <div class="trend-chart" id="trendChart">
+          <div class="empty">上传文件后显示。</div>
+        </div>
+      </div>
+
+      <div class="panel card">
+        <div class="panel-header">
+          <div>
+            <h2 id="rankLeftTitle">Top 达人</h2>
+            <p id="rankLeftDesc">按当前视图的核心指标排序。</p>
+          </div>
+          <div class="tag">排行</div>
+        </div>
+        <div class="rank-grid" id="rankLeftList">
+          <div class="empty">上传文件后显示。</div>
+        </div>
+      </div>
+
+      <div class="panel card">
+        <div class="panel-header">
+          <div>
+            <h2 id="rankRightTitle">Top 产品</h2>
+            <p id="rankRightDesc">按当前视图的核心指标排序。</p>
+          </div>
+          <div class="tag">排行</div>
+        </div>
+        <div class="rank-grid" id="rankRightList">
+          <div class="empty">上传文件后显示。</div>
+        </div>
+      </div>
+    </section>
+
+    <section class="panel table-panel" style="margin-top:16px;">
+      <div class="panel-header">
+        <div>
+          <h2 id="tableTitle">明细表</h2>
+          <p id="tableDesc">当前视图的明细预览，可按品牌、达人等级、产品阶段筛选。</p>
+        </div>
+        <div class="tag" id="tableTag">Detail</div>
+      </div>
+
+      <div class="filter-grid">
+        <input id="searchInput" type="search" placeholder="搜索达人 / 产品 / 视频 / PID" disabled>
+        <select id="brandFilter" disabled>
+          <option value="">全部品牌</option>
+        </select>
+        <select id="levelFilter" disabled>
+          <option value="">全部达人等级</option>
+        </select>
+        <select id="periodFilter" disabled>
+          <option value="">全部产品阶段</option>
+        </select>
+        <input id="startDateFilter" type="date" disabled>
+        <input id="endDateFilter" type="date" disabled>
+        <button id="resetBtn" class="secondary" disabled>重置筛选</button>
+      </div>
+
+      <div class="table-wrap">
+        <table>
+          <thead id="tableHead"></thead>
+          <tbody id="detailTable">
+            <tr><td class="empty">上传文件后显示。</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="pagination">
+        <div class="mini" id="pageInfo">上传文件后显示。</div>
+        <div class="pagination-actions">
+          <button id="prevPageBtn" class="secondary" disabled>上一页</button>
+          <button id="nextPageBtn" class="secondary" disabled>下一页</button>
+        </div>
+      </div>
+    </section>
+  </div>
+
+  <script>
+    const BRANDS = ["sparco", "letme", "icyee", "stypro"];
+    const BRAND_RULES = [
+      { code: "SPARCO", tokens: ["spar.co", "sparco", "spar co"] },
+      { code: "LETME", tokens: ["let me", "letme"] },
+      { code: "ICYEE", tokens: ["icyee", "ic yee"] },
+      { code: "STYPRO", tokens: ["stypro"] }
+    ];
+    const VIEW_HINTS = {
+      transaction: "当前视图：交易归因口径，适合看 GMV、订单、达人带货产出和产品阶段表现。",
+      performance: "当前视图：播放内容口径，适合看 VV、互动、CTR、完播率和达人内容效率。",
+      lifecycle: "当前视图：生命周期看板，适合看同一生命周期下不同达人层级的覆盖、视频产出、交易和播放汇总。",
+      refund: "当前视图：Refund 监控，适合看达人和视频两个层级的退款金额、退款件数、退货率。",
+      linkage: "当前视图：播放-交易联动口径，适合看高播放低转化、低播放高转化以及视频联动效果。"
+    };
+
+    const state = {
+      currentView: "transaction",
+      currentPage: 1,
+      pageSize: 50,
+      notices: [],
+      files: {
+        transaction: [],
+        performance: [],
+        lifecycle: [],
+        creator: []
+      },
+      raw: {
+        transactionRows: [],
+        performanceRows: [],
+        lifecycleRows: [],
+        creatorRows: []
+      },
+      merged: {
+        transactionRows: [],
+        performanceRows: [],
+        lifecycleRows: [],
+        refundRows: [],
+        linkageRows: []
+      },
+      filteredRows: [],
+      summary: null,
+      refundSourceRows: []
+    };
+
+    const refs = {
+      transactionFiles: document.getElementById("transactionFiles"),
+      performanceFiles: document.getElementById("performanceFiles"),
+      lifecycleFiles: document.getElementById("lifecycleFiles"),
+      creatorFiles: document.getElementById("creatorFiles"),
+      transactionStatus: document.getElementById("transactionStatus"),
+      performanceStatus: document.getElementById("performanceStatus"),
+      lifecycleStatus: document.getElementById("lifecycleStatus"),
+      creatorStatus: document.getElementById("creatorStatus"),
+      processBtn: document.getElementById("processBtn"),
+      downloadBtn: document.getElementById("downloadBtn"),
+      statsSection: document.getElementById("statsSection"),
+      healthList: document.getElementById("healthList"),
+      issueTitle: document.getElementById("issueTitle"),
+      issueDesc: document.getElementById("issueDesc"),
+      issueList: document.getElementById("issueList"),
+      actionList: document.getElementById("actionList"),
+      trendDesc: document.getElementById("trendDesc"),
+      trendTag: document.getElementById("trendTag"),
+      trendChart: document.getElementById("trendChart"),
+      rankLeftTitle: document.getElementById("rankLeftTitle"),
+      rankLeftDesc: document.getElementById("rankLeftDesc"),
+      rankLeftList: document.getElementById("rankLeftList"),
+      rankRightTitle: document.getElementById("rankRightTitle"),
+      rankRightDesc: document.getElementById("rankRightDesc"),
+      rankRightList: document.getElementById("rankRightList"),
+      tableTitle: document.getElementById("tableTitle"),
+      tableDesc: document.getElementById("tableDesc"),
+      tableTag: document.getElementById("tableTag"),
+      tableHead: document.getElementById("tableHead"),
+      detailTable: document.getElementById("detailTable"),
+      pageInfo: document.getElementById("pageInfo"),
+      prevPageBtn: document.getElementById("prevPageBtn"),
+      nextPageBtn: document.getElementById("nextPageBtn"),
+      searchInput: document.getElementById("searchInput"),
+      brandFilter: document.getElementById("brandFilter"),
+      levelFilter: document.getElementById("levelFilter"),
+      periodFilter: document.getElementById("periodFilter"),
+      startDateFilter: document.getElementById("startDateFilter"),
+      endDateFilter: document.getElementById("endDateFilter"),
+      resetBtn: document.getElementById("resetBtn"),
+      viewHint: document.getElementById("viewHint"),
+      tabButtons: [...document.querySelectorAll(".tab-btn")]
+    };
+
+    const formatInt = (value) => new Intl.NumberFormat("zh-CN").format(Number(value || 0));
+    const formatRp = (value) => `Rp ${formatInt(Math.round(Number(value || 0)))}`;
+    const formatPct = (value) => `${Number(value || 0).toFixed(2)}%`;
+    const short = (text, limit = 56) => {
+      const value = String(text || "");
+      return value.length > limit ? `${value.slice(0, limit)}...` : value;
+    };
+    const escapeHtml = (value) => String(value ?? "")
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/\"/g, "&quot;")
+      .replace(/'/g, "&#39;");
+
+    function normalizeText(value) {
+      return String(value ?? "")
+        .trim()
+        .toLowerCase()
+        .replace(/\n/g, " ")
+        .replace(/\s+/g, " ");
+    }
+
+    function normalizeHeader(value) {
+      return normalizeText(value).replace(/[_-]+/g, " ");
+    }
+
+    function detectBrand(name) {
+      const lower = normalizeText(name);
+      const hit = BRANDS.find((brand) => lower.includes(brand));
+      return hit ? hit.toUpperCase() : "UNKNOWN";
+    }
+
+    function detectBrandFromText(text) {
+      const lower = normalizeText(text);
+      for (const rule of BRAND_RULES) {
+        if (rule.tokens.some((token) => lower.includes(token))) return rule.code;
+      }
+      return "UNKNOWN";
+    }
+
+    function resolveBrand(...values) {
+      for (const value of values) {
+        const textHit = detectBrandFromText(value);
+        if (textHit !== "UNKNOWN") return textHit;
+        const fileHit = detectBrand(value);
+        if (fileHit !== "UNKNOWN") return fileHit;
+      }
+      return "UNKNOWN";
+    }
+
+    function setStatus(node, type, text) {
+      node.className = `status ${type}`;
+      node.innerHTML = `<span class="dot"></span>${text}`;
+    }
+
+    function safeNumber(value) {
+      if (value === null || value === undefined) return 0;
+      if (typeof value === "number") return Number.isFinite(value) ? value : 0;
+      const text = String(value).trim();
+      if (!text) return 0;
+      const cleaned = text
+        .replace(/rp/ig, "")
+        .replace(/,/g, "")
+        .replace(/\.(?=\d{3}(\D|$))/g, "")
+        .replace(/%/g, "")
+        .replace(/[^\d.-]/g, "");
+      const parsed = Number(cleaned);
+      return Number.isFinite(parsed) ? parsed : 0;
+    }
+
+    function excelSerialToDateLabel(value) {
+      const dateValue = parseDateValue(value);
+      return dateValue ? dateValue.slice(5) : "";
+    }
+
+    function excelSerialToDateValue(value) {
+      const serial = safeNumber(value);
+      if (!serial) return "";
+      const utcDays = Math.floor(serial - 25569);
+      const utcValue = utcDays * 86400;
+      const date = new Date(utcValue * 1000);
+      if (Number.isNaN(date.getTime())) return "";
+      return `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, "0")}-${String(date.getUTCDate()).padStart(2, "0")}`;
+    }
+
+    function parseDateValue(value) {
+      if (typeof value === "number") return excelSerialToDateValue(value);
+      const text = String(value || "").trim();
+      if (!text) return "";
+
+      let match = text.match(/(\d{4})[\/-](\d{1,2})[\/-](\d{1,2})/);
+      if (match) {
+        return `${match[1]}-${String(match[2]).padStart(2, "0")}-${String(match[3]).padStart(2, "0")}`;
+      }
+
+      match = text.match(/(\d{1,2})[\/-](\d{1,2})[\/-](\d{4})/);
+      if (match) {
+        return `${match[3]}-${String(match[1]).padStart(2, "0")}-${String(match[2]).padStart(2, "0")}`;
+      }
+
+      return "";
+    }
+
+    function parseDateLabel(value) {
+      if (typeof value === "number") return excelSerialToDateLabel(value);
+      const dateValue = parseDateValue(value);
+      return dateValue ? dateValue.slice(5) : "";
+    }
+
+    function parsePidFromProducts(text) {
+      const match = String(text || "").match(/\((\d{10,})\)\s*$/);
+      return match ? match[1] : "";
+    }
+
+    function stripPidFromProducts(text) {
+      return String(text || "").replace(/\((\d{10,})\)\s*$/, "").trim();
+    }
+
+    async function readWorkbookArrays(file) {
+      const buffer = await file.arrayBuffer();
+      const workbook = XLSX.read(buffer, { type: "array" });
+      const sheet = workbook.Sheets[workbook.SheetNames[0]];
+      return XLSX.utils.sheet_to_json(sheet, { header: 1, defval: "" });
+    }
+
+    function findHeaderRow(matrix, requiredHeaders) {
+      const normalizedRequired = requiredHeaders.map(normalizeHeader);
+      for (let i = 0; i < Math.min(matrix.length, 12); i += 1) {
+        const row = matrix[i].map(normalizeHeader);
+        if (normalizedRequired.every((header) => row.includes(header))) return i;
+      }
+      return -1;
+    }
+
+    function rowsFromMatrix(matrix, headerRowIndex) {
+      const headers = matrix[headerRowIndex] || [];
+      const rows = [];
+      for (let i = headerRowIndex + 1; i < matrix.length; i += 1) {
+        const source = matrix[i];
+        if (!source || !source.some((cell) => String(cell || "").trim())) continue;
+        const row = {};
+        headers.forEach((header, index) => {
+          if (String(header || "").trim()) row[header] = source[index] ?? "";
+        });
+        if (Object.keys(row).length) rows.push(row);
+      }
+      return rows;
+    }
+
+    function extractRowsWithDetectedHeader(matrix, requiredHeaders) {
+      const headerRowIndex = findHeaderRow(matrix, requiredHeaders);
+      if (headerRowIndex < 0) return [];
+      return rowsFromMatrix(matrix, headerRowIndex);
+    }
+
+    function detectMatrixType(matrix) {
+      if (findHeaderRow(matrix, ["Video ID", "Creator name", "Product ID"]) >= 0) return "transaction";
+      if (findHeaderRow(matrix, ["Creator name", "Video ID", "VV"]) >= 0) return "performance";
+      if (findHeaderRow(matrix, ["PID"]) >= 0) return "lifecycle";
+      if (findHeaderRow(matrix, ["level", "sparco"]) >= 0) return "creator";
+      return "unknown";
+    }
+
+    function typeLabel(type) {
+      return {
+        transaction: "交易归因表",
+        performance: "播放表现表",
+        lifecycle: "产品生命周期表",
+        creator: "达人等级表",
+        unknown: "未知类型文件"
+      }[type] || "未知类型文件";
+    }
+
+    function findKey(sample, acceptedHeaders) {
+      const mapping = new Map();
+      Object.keys(sample || {}).forEach((key) => mapping.set(normalizeHeader(key), key));
+      for (const header of acceptedHeaders) {
+        const hit = mapping.get(normalizeHeader(header));
+        if (hit) return hit;
+      }
+      return "";
+    }
+
+    function mapTransactionColumns(sample) {
+      return {
+        creator: findKey(sample, ["Creator name"]),
+        videoId: findKey(sample, ["Video ID"]),
+        time: findKey(sample, ["Post date"]),
+        productId: findKey(sample, ["Product ID", "PID"]),
+        productName: findKey(sample, ["Product name"]),
+        gmv: findKey(sample, ["Affiliate video-attributed GMV"]),
+        orders: findKey(sample, ["Video-attributed orders"]),
+        itemsSold: findKey(sample, ["Video-attributed items sold"]),
+        refunds: findKey(sample, ["Refunds"]),
+        itemsRefunded: findKey(sample, ["Items refunded"])
+      };
+    }
+
+    function mapPerformanceColumns(sample) {
+      return {
+        creator: findKey(sample, ["Creator name"]),
+        videoId: findKey(sample, ["Video ID"]),
+        time: findKey(sample, ["Time"]),
+        products: findKey(sample, ["Products"]),
+        vv: findKey(sample, ["VV"]),
+        likes: findKey(sample, ["Likes"]),
+        comments: findKey(sample, ["Comments"]),
+        shares: findKey(sample, ["Shares"]),
+        impressions: findKey(sample, ["Product Impressions"]),
+        clicks: findKey(sample, ["Product Clicks"]),
+        orders: findKey(sample, ["Orders"]),
+        gmv: findKey(sample, ["Shoppable video attributed GMV (Rp)", "Shoppable video attributed GMV"]),
+        ctr: findKey(sample, ["Click-through rate (Video)"]),
+        finishRate: findKey(sample, ["Video Finish Rate"]),
+        diagnosis: findKey(sample, ["Diagnosis"])
+      };
+    }
+
+    function mapLifecycleColumns(sample) {
+      return {
+        pid: findKey(sample, ["PID", "Product ID"]),
+        period: findKey(sample, ["product period", "产品阶段", "period"]),
+        productNameCn: findKey(sample, ["产品名", "product name_cn", "product name cn"]),
+        productNameRaw: findKey(sample, ["product name", "product name_raw", "product name raw"])
+      };
+    }
+
+    function mapCreatorColumns(sample) {
+      return {
+        creator: findKey(sample, ["creator name", "sparco"]),
+        level: findKey(sample, ["creator level", "level", "达人等级"]),
+        brand: findKey(sample, ["brand", "品牌"])
+      };
+    }
+
+    function enableControls() {
+      [
+        refs.downloadBtn,
+        refs.searchInput,
+        refs.brandFilter,
+        refs.levelFilter,
+        refs.periodFilter,
+        refs.startDateFilter,
+        refs.endDateFilter,
+        refs.resetBtn,
+        refs.prevPageBtn,
+        refs.nextPageBtn
+      ].forEach((node) => { node.disabled = false; });
+    }
+
+    async function loadTransactionFiles() {
+      const allRows = [];
+      for (const file of state.files.transaction) {
+        const matrix = await readWorkbookArrays(file);
+        const detectedType = detectMatrixType(matrix);
+        if (detectedType !== "transaction") {
+          if (detectedType !== "unknown") {
+            state.notices.push(`文件「${file.name}」上传在交易归因区域，但识别为${typeLabel(detectedType)}，已自动跳过。`);
+            continue;
+          }
+        }
+        const rows = extractRowsWithDetectedHeader(matrix, ["Video ID", "Creator name", "Product ID"]);
+        if (!rows.length) {
+          throw new Error(`交易归因文件「${file.name}」未识别到有效表头，期望字段包含：Creator name、Video ID、Product ID`);
+        }
+        const columns = mapTransactionColumns(rows[0] || {});
+        const missing = [
+          ["Creator name", columns.creator],
+          ["Video ID", columns.videoId],
+          ["Product ID", columns.productId]
+        ].filter(([, value]) => !value).map(([label]) => label);
+        if (missing.length) {
+          throw new Error(`交易归因文件「${file.name}」缺少必需字段：${missing.join("、")}`);
+        }
+        rows.forEach((row) => {
+          if (!String(row[columns.videoId] || "").trim()) return;
+          const productNameRaw = String(row[columns.productName] || "").trim();
+          allRows.push({
+            brand: resolveBrand(productNameRaw, file.name),
+            creator_name: String(row[columns.creator] || "").trim(),
+            video_id: String(row[columns.videoId] || "").trim(),
+            date_value: parseDateValue(row[columns.time]),
+            date_label: parseDateLabel(row[columns.time]),
+            product_id: String(row[columns.productId] || "").trim(),
+            product_name_raw: productNameRaw,
+            gmv: safeNumber(row[columns.gmv]),
+            orders: safeNumber(row[columns.orders]),
+            items_sold: safeNumber(row[columns.itemsSold]),
+            refunds: safeNumber(row[columns.refunds]),
+            items_refunded: safeNumber(row[columns.itemsRefunded])
+          });
+        });
+      }
+      state.raw.transactionRows = allRows;
+    }
+
+    async function loadPerformanceFiles() {
+      const allRows = [];
+      for (const file of state.files.performance) {
+        const matrix = await readWorkbookArrays(file);
+        const detectedType = detectMatrixType(matrix);
+        if (detectedType !== "performance") {
+          if (detectedType !== "unknown") {
+            state.notices.push(`文件「${file.name}」上传在播放表现区域，但识别为${typeLabel(detectedType)}，已自动跳过。`);
+            continue;
+          }
+        }
+        const rows = extractRowsWithDetectedHeader(matrix, ["Creator name", "Video ID", "VV"]);
+        if (!rows.length) {
+          throw new Error(`播放表现文件「${file.name}」未识别到有效表头，期望字段包含：Creator name、Video ID、VV`);
+        }
+        const columns = mapPerformanceColumns(rows[0] || {});
+        const missing = [
+          ["Creator name", columns.creator],
+          ["Video ID", columns.videoId],
+          ["VV", columns.vv]
+        ].filter(([, value]) => !value).map(([label]) => label);
+        if (missing.length) {
+          throw new Error(`播放表现文件「${file.name}」缺少必需字段：${missing.join("、")}`);
+        }
+        rows.forEach((row) => {
+          if (!String(row[columns.videoId] || "").trim()) return;
+          const productsCell = String(row[columns.products] || "").trim();
+          allRows.push({
+            brand: resolveBrand(productsCell, file.name),
+            creator_name: String(row[columns.creator] || "").trim(),
+            video_id: String(row[columns.videoId] || "").trim(),
+            date_value: parseDateValue(row[columns.time]),
+            date_label: parseDateLabel(row[columns.time]),
+            products_text: productsCell,
+            product_id: parsePidFromProducts(productsCell),
+            vv: safeNumber(row[columns.vv]),
+            likes: safeNumber(row[columns.likes]),
+            comments: safeNumber(row[columns.comments]),
+            shares: safeNumber(row[columns.shares]),
+            impressions: safeNumber(row[columns.impressions]),
+            clicks: safeNumber(row[columns.clicks]),
+            orders: safeNumber(row[columns.orders]),
+            gmv: safeNumber(row[columns.gmv]),
+            ctr: safeNumber(row[columns.ctr]),
+            finish_rate: safeNumber(row[columns.finishRate]),
+            diagnosis: String(row[columns.diagnosis] || "").trim()
+          });
+        });
+      }
+      state.raw.performanceRows = allRows;
+    }
+
+    async function loadLifecycleFiles() {
+      const allRows = [];
+      for (const file of state.files.lifecycle) {
+        const matrix = await readWorkbookArrays(file);
+        const detectedType = detectMatrixType(matrix);
+        if (detectedType !== "lifecycle") {
+          if (detectedType !== "unknown") {
+            state.notices.push(`文件「${file.name}」上传在产品生命周期区域，但识别为${typeLabel(detectedType)}，已自动跳过。`);
+            continue;
+          }
+        }
+        const rows = extractRowsWithDetectedHeader(matrix, ["PID"]);
+        if (!rows.length) {
+          throw new Error(`产品生命周期文件「${file.name}」未识别到有效表头，期望字段包含：PID、product name`);
+        }
+        const columns = mapLifecycleColumns(rows[0] || {});
+        const missing = [
+          ["PID", columns.pid],
+          ["product name", columns.productNameRaw]
+        ].filter(([, value]) => !value).map(([label]) => label);
+        if (missing.length) {
+          throw new Error(`产品生命周期文件「${file.name}」缺少必需字段：${missing.join("、")}`);
+        }
+        rows.forEach((row) => {
+          const pid = String(row[columns.pid] || "").trim();
+          if (!/^\d{10,}$/.test(pid)) return;
+          const productNameRaw = String(row[columns.productNameRaw] || "").trim();
+          const productNameCn = String(row[columns.productNameCn] || "").trim();
+          allRows.push({
+            brand: resolveBrand(productNameRaw, productNameCn, file.name),
+            pid,
+            product_period: String(row[columns.period] || "").trim(),
+            product_name_cn: productNameCn,
+            product_name_raw: productNameRaw
+          });
+        });
+      }
+      state.raw.lifecycleRows = allRows;
+    }
+
+    async function loadCreatorFiles() {
+      const allRows = [];
+      for (const file of state.files.creator) {
+        const matrix = await readWorkbookArrays(file);
+        const detectedType = detectMatrixType(matrix);
+        if (detectedType !== "creator") {
+          if (detectedType !== "unknown") {
+            state.notices.push(`文件「${file.name}」上传在达人等级区域，但识别为${typeLabel(detectedType)}，已自动跳过。`);
+            continue;
+          }
+        }
+        const rows = extractRowsWithDetectedHeader(matrix, ["level", "sparco"]);
+        if (!rows.length) {
+          throw new Error(`达人等级文件「${file.name}」未识别到有效表头，期望字段包含：level、sparco`);
+        }
+        const columns = mapCreatorColumns(rows[0] || {});
+        const missing = [
+          ["creator name / sparco", columns.creator],
+          ["creator level / level", columns.level]
+        ].filter(([, value]) => !value).map(([label]) => label);
+        if (missing.length) {
+          throw new Error(`达人等级文件「${file.name}」缺少必需字段：${missing.join("、")}`);
+        }
+        rows.forEach((row) => {
+          const creator = String(row[columns.creator] || "").trim();
+          if (!creator) return;
+          allRows.push({
+            brand: resolveBrand(String(row[columns.brand] || "").trim(), file.name),
+            creator_name: creator,
+            creator_level: String(row[columns.level] || "L3").trim() || "L3"
+          });
+        });
+      }
+      state.raw.creatorRows = allRows;
+    }
+
+    function buildDimensionMaps() {
+      const lifecycleMap = new Map();
+      state.raw.lifecycleRows.forEach((row) => {
+        lifecycleMap.set(row.pid, row);
+      });
+
+      const creatorMap = new Map();
+      state.raw.creatorRows.forEach((row) => {
+        const creatorKey = normalizeText(row.creator_name);
+        creatorMap.set(`${row.brand}__${creatorKey}`, row.creator_level);
+      });
+
+      return { lifecycleMap, creatorMap };
+    }
+
+    function buildTransactionRows(dimensions) {
+      state.merged.transactionRows = state.raw.transactionRows.map((row) => {
+        const lifecycle = dimensions.lifecycleMap.get(row.product_id) || null;
+        const creatorKey = normalizeText(row.creator_name);
+        const creatorLevel = dimensions.creatorMap.get(`${row.brand}__${creatorKey}`) || "L3";
+        return {
+          ...row,
+          creator_level: creatorLevel,
+          product_name_cn: lifecycle?.product_name_cn || "",
+          product_period: lifecycle?.product_period || "",
+          lifecycle_matched: Boolean(lifecycle)
+        };
+      });
+    }
+
+    function buildPerformanceRows(dimensions) {
+      state.merged.performanceRows = state.raw.performanceRows.map((row) => {
+        const lifecycle = row.product_id ? dimensions.lifecycleMap.get(row.product_id) : null;
+        const creatorKey = normalizeText(row.creator_name);
+        const creatorLevel = dimensions.creatorMap.get(`${row.brand}__${creatorKey}`) || "L3";
+        return {
+          ...row,
+          creator_level: creatorLevel,
+          product_name_cn: lifecycle?.product_name_cn || "",
+          product_period: lifecycle?.product_period || "",
+          lifecycle_matched: Boolean(lifecycle)
+        };
+      });
+    }
+
+    function buildLinkageRows() {
+      const txnByVideo = new Map();
+      state.merged.transactionRows.forEach((row) => {
+        const current = txnByVideo.get(row.video_id) || {
+          brand: row.brand,
+          video_id: row.video_id,
+          creator_name: row.creator_name,
+          creator_level: row.creator_level,
+          txn_gmv: 0,
+          txn_orders: 0,
+          linked_products: new Set(),
+          product_periods: new Set(),
+          product_names: new Set()
+        };
+        current.txn_gmv += row.gmv;
+        current.txn_orders += row.orders;
+        current.txn_date_value = current.txn_date_value || row.date_value;
+        if (row.product_id) current.linked_products.add(row.product_id);
+        if (row.product_period) current.product_periods.add(row.product_period);
+        if (row.product_name_cn || row.product_name_raw) current.product_names.add(row.product_name_cn || row.product_name_raw);
+        txnByVideo.set(row.video_id, current);
+      });
+
+      state.merged.linkageRows = state.merged.performanceRows
+        .filter((row) => txnByVideo.has(row.video_id))
+        .map((row) => {
+          const txn = txnByVideo.get(row.video_id);
+          return {
+            brand: row.brand || txn.brand,
+            creator_name: row.creator_name,
+            creator_level: row.creator_level,
+            video_id: row.video_id,
+            date_label: row.date_label,
+            date_value: row.date_value,
+            txn_date_value: txn.txn_date_value || "",
+            vv: row.vv,
+            likes: row.likes,
+            comments: row.comments,
+            shares: row.shares,
+            ctr: row.ctr,
+            finish_rate: row.finish_rate,
+            txn_gmv: txn.txn_gmv,
+            txn_orders: txn.txn_orders,
+            product_period: row.product_period || [...txn.product_periods][0] || "",
+            product_name_cn: row.product_name_cn || [...txn.product_names][0] || "",
+            product_name_raw: row.product_name_raw || stripPidFromProducts(row.products_text) || [...txn.product_names][0] || ""
+          };
+        });
+    }
+
+    function aggregateLifecycleRows(transactionRows, performanceRows) {
+      const bucketMap = new Map();
+
+      function ensureBucket(brand, period) {
+        const productPeriod = period || "未设置阶段";
+        const key = `${brand}__${productPeriod}`;
+        if (!bucketMap.has(key)) {
+          bucketMap.set(key, {
+            brand,
+            product_period: productPeriod,
+            creator_count: 0,
+            product_count: 0,
+            video_count: 0,
+            performance_video_count: 0,
+            transaction_video_count: 0,
+            vv: 0,
+            engagement: 0,
+            play_gmv: 0,
+            txn_gmv: 0,
+            txn_orders: 0,
+            items_sold: 0,
+            _creatorKeys: new Set(),
+            _productIds: new Set(),
+            _videoIds: new Set(),
+            _performanceVideoIds: new Set(),
+            _transactionVideoIds: new Set(),
+            _levelMap: new Map(),
+            _productMap: new Map()
+          });
+        }
+        return bucketMap.get(key);
+      }
+
+      function ensureLevel(bucket, level) {
+        const creatorLevel = level || "L3";
+        if (!bucket._levelMap.has(creatorLevel)) {
+          bucket._levelMap.set(creatorLevel, {
+            level: creatorLevel,
+            creator_count: 0,
+            video_count: 0,
+            vv: 0,
+            txn_gmv: 0,
+            txn_orders: 0,
+            _creatorKeys: new Set(),
+            _videoIds: new Set()
+          });
+        }
+        return bucket._levelMap.get(creatorLevel);
+      }
+
+      function ensureProduct(bucket, row) {
+        const key = row.product_id || row.product_name_raw || row.product_name_cn || row.products_text || "未识别产品";
+        if (!bucket._productMap.has(key)) {
+          bucket._productMap.set(key, {
+            product_id: row.product_id || "",
+            product_name_cn: row.product_name_cn || "",
+            product_name_raw: row.product_name_raw || stripPidFromProducts(row.products_text) || "",
+            creator_count: 0,
+            video_count: 0,
+            performance_video_count: 0,
+            transaction_video_count: 0,
+            vv: 0,
+            txn_gmv: 0,
+            txn_orders: 0,
+            items_sold: 0,
+            _creatorKeys: new Set(),
+            _videoIds: new Set(),
+            _performanceVideoIds: new Set(),
+            _transactionVideoIds: new Set(),
+            _levelMap: new Map()
+          });
+        }
+        return bucket._productMap.get(key);
+      }
+
+      function ensureProductLevel(product, level) {
+        const creatorLevel = level || "L3";
+        if (!product._levelMap.has(creatorLevel)) {
+          product._levelMap.set(creatorLevel, {
+            level: creatorLevel,
+            creator_count: 0,
+            video_count: 0,
+            performance_video_count: 0,
+            transaction_video_count: 0,
+            vv: 0,
+            txn_gmv: 0,
+            txn_orders: 0,
+            items_sold: 0,
+            _creatorKeys: new Set(),
+            _videoIds: new Set(),
+            _performanceVideoIds: new Set(),
+            _transactionVideoIds: new Set()
+          });
+        }
+        return product._levelMap.get(creatorLevel);
+      }
+
+      performanceRows.forEach((row) => {
+        const bucket = ensureBucket(row.brand, row.product_period);
+        const level = ensureLevel(bucket, row.creator_level);
+        const product = ensureProduct(bucket, row);
+        const productLevel = ensureProductLevel(product, row.creator_level);
+        if (row.creator_name) bucket._creatorKeys.add(`${row.brand}__${normalizeText(row.creator_name)}`);
+        if (row.product_id) bucket._productIds.add(row.product_id);
+        if (row.video_id) {
+          bucket._videoIds.add(row.video_id);
+          bucket._performanceVideoIds.add(row.video_id);
+        }
+        bucket.vv += row.vv;
+        bucket.engagement += row.likes + row.comments + row.shares;
+        bucket.play_gmv += row.gmv;
+
+        if (row.creator_name) level._creatorKeys.add(`${row.brand}__${normalizeText(row.creator_name)}`);
+        if (row.video_id) level._videoIds.add(row.video_id);
+        level.vv += row.vv;
+
+        if (row.creator_name) product._creatorKeys.add(`${row.brand}__${normalizeText(row.creator_name)}`);
+        if (row.video_id) {
+          product._videoIds.add(row.video_id);
+          product._performanceVideoIds.add(row.video_id);
+        }
+        product.vv += row.vv;
+
+        if (row.creator_name) productLevel._creatorKeys.add(`${row.brand}__${normalizeText(row.creator_name)}`);
+        if (row.video_id) {
+          productLevel._videoIds.add(row.video_id);
+          productLevel._performanceVideoIds.add(row.video_id);
+        }
+        productLevel.vv += row.vv;
+      });
+
+      transactionRows.forEach((row) => {
+        const bucket = ensureBucket(row.brand, row.product_period);
+        const level = ensureLevel(bucket, row.creator_level);
+        const product = ensureProduct(bucket, row);
+        const productLevel = ensureProductLevel(product, row.creator_level);
+        if (row.creator_name) bucket._creatorKeys.add(`${row.brand}__${normalizeText(row.creator_name)}`);
+        if (row.product_id) bucket._productIds.add(row.product_id);
+        if (row.video_id) {
+          bucket._videoIds.add(row.video_id);
+          bucket._transactionVideoIds.add(row.video_id);
+        }
+        bucket.txn_gmv += row.gmv;
+        bucket.txn_orders += row.orders;
+        bucket.items_sold += row.items_sold;
+
+        if (row.creator_name) level._creatorKeys.add(`${row.brand}__${normalizeText(row.creator_name)}`);
+        if (row.video_id) level._videoIds.add(row.video_id);
+        level.txn_gmv += row.gmv;
+        level.txn_orders += row.orders;
+
+        if (row.creator_name) product._creatorKeys.add(`${row.brand}__${normalizeText(row.creator_name)}`);
+        if (row.video_id) {
+          product._videoIds.add(row.video_id);
+          product._transactionVideoIds.add(row.video_id);
+        }
+        product.txn_gmv += row.gmv;
+        product.txn_orders += row.orders;
+        product.items_sold += row.items_sold;
+
+        if (row.creator_name) productLevel._creatorKeys.add(`${row.brand}__${normalizeText(row.creator_name)}`);
+        if (row.video_id) {
+          productLevel._videoIds.add(row.video_id);
+          productLevel._transactionVideoIds.add(row.video_id);
+        }
+        productLevel.txn_gmv += row.gmv;
+        productLevel.txn_orders += row.orders;
+        productLevel.items_sold += row.items_sold;
+      });
+
+      return [...bucketMap.values()]
+        .map((row) => ({
+          ...row,
+          creator_count: row._creatorKeys.size,
+          product_count: row._productIds.size,
+          video_count: row._videoIds.size,
+          performance_video_count: row._performanceVideoIds.size,
+          transaction_video_count: row._transactionVideoIds.size,
+          level_breakdown: [...row._levelMap.values()]
+            .map((level) => ({
+              ...level,
+              creator_count: level._creatorKeys.size,
+              video_count: level._videoIds.size
+            }))
+            .sort((a, b) => a.level.localeCompare(b.level, "zh-CN")),
+          product_breakdown: [...row._productMap.values()]
+            .map((product) => ({
+              ...product,
+              creator_count: product._creatorKeys.size,
+              video_count: product._videoIds.size,
+              performance_video_count: product._performanceVideoIds.size,
+              transaction_video_count: product._transactionVideoIds.size,
+              level_breakdown: [...product._levelMap.values()]
+                .map((level) => ({
+                  ...level,
+                  creator_count: level._creatorKeys.size,
+                  video_count: level._videoIds.size,
+                  performance_video_count: level._performanceVideoIds.size,
+                  transaction_video_count: level._transactionVideoIds.size
+                }))
+                .sort((a, b) => a.level.localeCompare(b.level, "zh-CN"))
+            }))
+            .sort((a, b) => {
+              if (b.txn_gmv !== a.txn_gmv) return b.txn_gmv - a.txn_gmv;
+              if (b.vv !== a.vv) return b.vv - a.vv;
+              return (a.product_name_cn || a.product_name_raw).localeCompare(b.product_name_cn || b.product_name_raw, "zh-CN");
+            }),
+          _productSearch: [...row._productMap.values()].map((product) => `${product.product_name_cn} ${product.product_name_raw} ${product.product_id}`).join(" "),
+          _creatorKeys: [...row._creatorKeys],
+          _productIds: [...row._productIds],
+          _videoIds: [...row._videoIds],
+          _performanceVideoIds: [...row._performanceVideoIds],
+          _transactionVideoIds: [...row._transactionVideoIds]
+        }))
+        .sort((a, b) => {
+          if (b.txn_gmv !== a.txn_gmv) return b.txn_gmv - a.txn_gmv;
+          if (b.vv !== a.vv) return b.vv - a.vv;
+          return a.product_period.localeCompare(b.product_period, "zh-CN");
+        });
+    }
+
+    function buildLifecycleRows() {
+      state.merged.lifecycleRows = aggregateLifecycleRows(state.merged.transactionRows, state.merged.performanceRows);
+    }
+
+    function aggregateRefundRows(transactionRows) {
+      const creatorMap = new Map();
+      const videoMap = new Map();
+
+      function ensureCreator(row) {
+        const key = `${row.brand}__${normalizeText(row.creator_name)}__${row.creator_level}`;
+        if (!creatorMap.has(key)) {
+          creatorMap.set(key, {
+            entity_type: "达人",
+            brand: row.brand,
+            creator_name: row.creator_name,
+            creator_level: row.creator_level,
+            video_id: "",
+            video_count: 0,
+            orders: 0,
+            items_sold: 0,
+            refunds: 0,
+            items_refunded: 0,
+            gmv: 0,
+            refund_rate: 0,
+            refund_gmv_rate: 0,
+            _videoIds: new Set()
+          });
+        }
+        return creatorMap.get(key);
+      }
+
+      function ensureVideo(row) {
+        const key = `${row.brand}__${row.video_id}`;
+        if (!videoMap.has(key)) {
+          videoMap.set(key, {
+            entity_type: "视频",
+            brand: row.brand,
+            creator_name: row.creator_name,
+            creator_level: row.creator_level,
+            video_id: row.video_id,
+            video_count: 1,
+            orders: 0,
+            items_sold: 0,
+            refunds: 0,
+            items_refunded: 0,
+            gmv: 0,
+            refund_rate: 0,
+            refund_gmv_rate: 0
+          });
+        }
+        return videoMap.get(key);
+      }
+
+      transactionRows.forEach((row) => {
+        const creator = ensureCreator(row);
+        if (row.video_id) creator._videoIds.add(row.video_id);
+        creator.orders += row.orders;
+        creator.items_sold += row.items_sold;
+        creator.refunds += row.refunds;
+        creator.items_refunded += row.items_refunded;
+        creator.gmv += row.gmv;
+
+        const video = ensureVideo(row);
+        video.orders += row.orders;
+        video.items_sold += row.items_sold;
+        video.refunds += row.refunds;
+        video.items_refunded += row.items_refunded;
+        video.gmv += row.gmv;
+      });
+
+      const finalize = (row) => ({
+        ...row,
+        video_count: row._videoIds ? row._videoIds.size : row.video_count,
+        refund_rate: row.items_sold ? row.items_refunded / row.items_sold * 100 : 0,
+        refund_gmv_rate: row.gmv ? row.refunds / row.gmv * 100 : 0
+      });
+
+      return [
+        ...[...creatorMap.values()].map(finalize),
+        ...[...videoMap.values()].map(finalize)
+      ].sort((a, b) => {
+        if (b.refund_rate !== a.refund_rate) return b.refund_rate - a.refund_rate;
+        if (b.refunds !== a.refunds) return b.refunds - a.refunds;
+        return (b.orders || 0) - (a.orders || 0);
+      });
+    }
+
+    function buildRefundRows() {
+      state.merged.refundRows = aggregateRefundRows(state.merged.transactionRows);
+    }
+
+    function getCurrentRows() {
+      return state.currentView === "transaction"
+        ? state.merged.transactionRows
+        : state.currentView === "performance"
+          ? state.merged.performanceRows
+          : state.currentView === "lifecycle"
+            ? state.merged.lifecycleRows
+            : state.currentView === "refund"
+              ? state.merged.refundRows
+            : state.merged.linkageRows;
+    }
+
+    function getFilterState() {
+      return {
+        keyword: normalizeText(refs.searchInput.value),
+        brand: refs.brandFilter.value,
+        level: refs.levelFilter.value,
+        period: refs.periodFilter.value,
+        startDate: refs.startDateFilter.value,
+        endDate: refs.endDateFilter.value
+      };
+    }
+
+    function buildLifecycleFilteredRows(filters) {
+      const matchesBase = (row) => {
+        const periodValue = row.product_period || "未设置阶段";
+        const brandHit = !filters.brand || row.brand === filters.brand;
+        const levelHit = !filters.level || row.creator_level === filters.level;
+        const periodHit = !filters.period || periodValue === filters.period;
+        const startHit = !filters.startDate || (row.date_value && row.date_value >= filters.startDate);
+        const endHit = !filters.endDate || (row.date_value && row.date_value <= filters.endDate);
+        return brandHit && levelHit && periodHit && startHit && endHit;
+      };
+
+      const lifecycleRows = aggregateLifecycleRows(
+        state.merged.transactionRows.filter(matchesBase),
+        state.merged.performanceRows.filter(matchesBase)
+      );
+
+      return lifecycleRows.filter((row) => {
+        if (!filters.keyword) return true;
+        return [
+          row.brand,
+          row.product_period,
+          row._productSearch
+        ].some((field) => normalizeText(field).includes(filters.keyword));
+      });
+    }
+
+    function buildRefundFilteredRows(filters) {
+      const baseRows = state.merged.transactionRows.filter((row) => {
+        const periodValue = row.product_period || "未设置阶段";
+        const brandHit = !filters.brand || row.brand === filters.brand;
+        const levelHit = !filters.level || row.creator_level === filters.level;
+        const periodHit = !filters.period || periodValue === filters.period;
+        const startHit = !filters.startDate || (row.date_value && row.date_value >= filters.startDate);
+        const endHit = !filters.endDate || (row.date_value && row.date_value <= filters.endDate);
+        return brandHit && levelHit && periodHit && startHit && endHit;
+      });
+
+      state.refundSourceRows = baseRows;
+
+      return aggregateRefundRows(baseRows).filter((row) => {
+        if (!filters.keyword) return true;
+        return [
+          row.entity_type,
+          row.brand,
+          row.creator_name,
+          row.video_id
+        ].some((field) => normalizeText(field).includes(filters.keyword));
+      });
+    }
+
+    function buildCurrentSummary(rows) {
+      const brands = [...new Set(rows.map((row) => row.brand).filter(Boolean))].sort();
+      const levels = state.currentView === "lifecycle"
+        ? [...new Set(rows.flatMap((row) => (row.level_breakdown || []).map((item) => item.level)).filter(Boolean))].sort()
+        : [...new Set(rows.map((row) => row.creator_level).filter(Boolean))].sort();
+      const periods = [...new Set(rows.map((row) => row.product_period).filter(Boolean))].sort();
+      const trendMap = new Map();
+      const addTrend = (date, primary, secondary) => {
+        if (!date) return;
+        const current = trendMap.get(date) || { date, primary: 0, secondary: 0 };
+        current.primary += primary;
+        current.secondary += secondary;
+        trendMap.set(date, current);
+      };
+
+      if (state.currentView === "transaction") {
+        rows.forEach((row) => addTrend(row.date_label, row.gmv, row.orders));
+        return {
+          cards: [
+            { label: "归因行数", value: formatInt(rows.length), note: "粒度为视频 x 商品归因记录。" },
+            { label: "归因 GMV", value: formatRp(rows.reduce((sum, row) => sum + row.gmv, 0)), note: "来自交易归因表。" },
+            { label: "归因订单", value: formatInt(rows.reduce((sum, row) => sum + row.orders, 0)), note: "来自交易归因表。" },
+            { label: "去重达人", value: formatInt(new Set(rows.map((row) => normalizeText(row.creator_name))).size), note: "当前筛选范围内的达人。" },
+            { label: "PID 阶段命中率", value: formatPct(rows.length ? rows.filter((row) => row.lifecycle_matched).length / rows.length * 100 : 0), note: "命中产品生命周期表的占比。" },
+            { label: "达人等级命中率", value: formatPct(rows.length ? rows.filter((row) => row.creator_level !== "L3").length / rows.length * 100 : 0), note: "命中达人等级表的占比。" }
+          ],
+          trend: [...trendMap.values()].sort((a, b) => a.date.localeCompare(b.date)).slice(-14),
+          brands,
+          levels,
+          periods
+        };
+      }
+
+      if (state.currentView === "performance") {
+        rows.forEach((row) => addTrend(row.date_label, row.vv, row.gmv));
+        const ctrAvg = rows.length ? rows.reduce((sum, row) => sum + row.ctr, 0) / rows.length : 0;
+        const finishAvg = rows.length ? rows.reduce((sum, row) => sum + row.finish_rate, 0) / rows.length : 0;
+        return {
+          cards: [
+            { label: "视频行数", value: formatInt(rows.length), note: "播放明细行数。" },
+            { label: "总 VV", value: formatInt(rows.reduce((sum, row) => sum + row.vv, 0)), note: "当前筛选范围总播放量。" },
+            { label: "总互动", value: formatInt(rows.reduce((sum, row) => sum + row.likes + row.comments + row.shares, 0)), note: "点赞 + 评论 + 分享。" },
+            { label: "平均 CTR", value: formatPct(ctrAvg), note: "视频点击率平均值。" },
+            { label: "平均完播率", value: formatPct(finishAvg), note: "视频完播率平均值。" },
+            { label: "联动视频数", value: formatInt(rows.filter((row) => row.video_id).length), note: "可继续跟交易表联动的视频数。" }
+          ],
+          trend: [...trendMap.values()].sort((a, b) => a.date.localeCompare(b.date)).slice(-14),
+          brands,
+          levels,
+          periods
+        };
+      }
+
+      if (state.currentView === "lifecycle") {
+        const creatorUnion = new Set();
+        const videoUnion = new Set();
+        const periodSummary = new Map();
+        rows.forEach((row) => {
+          (row._creatorKeys || []).forEach((key) => creatorUnion.add(key));
+          (row._videoIds || []).forEach((id) => videoUnion.add(id));
+          const current = periodSummary.get(row.product_period) || { date: row.product_period, primary: 0, secondary: 0 };
+          current.primary += row.creator_count;
+          current.secondary += row.txn_gmv;
+          periodSummary.set(row.product_period, current);
+        });
+        return {
+          cards: [
+            { label: "生命周期阶段数", value: formatInt(new Set(rows.map((row) => row.product_period)).size), note: "当前筛选范围内包含的产品阶段。" },
+            { label: "层级分组数", value: formatInt(rows.length), note: "粒度为品牌 x 生命周期 x 达人等级。" },
+            { label: "覆盖达人数", value: formatInt(creatorUnion.size), note: "按品牌和达人去重后的覆盖达人。" },
+            { label: "关联视频数", value: formatInt(videoUnion.size), note: "交易与播放合并后的去重视频数。" },
+            { label: "总 VV", value: formatInt(rows.reduce((sum, row) => sum + row.vv, 0)), note: "生命周期分组下的视频播放总和。" },
+            { label: "归因 GMV", value: formatRp(rows.reduce((sum, row) => sum + row.txn_gmv, 0)), note: "生命周期分组下的交易归因总和。" }
+          ],
+          trend: [...periodSummary.values()].sort((a, b) => b.primary - a.primary).slice(0, 8),
+          brands,
+          levels,
+          periods
+        };
+      }
+
+      if (state.currentView === "refund") {
+        const sourceRows = state.refundSourceRows || [];
+        const anomalyCount = rows.filter((row) => row.refund_rate > 100).length;
+        const lowSampleCount = rows.filter((row) => row.items_sold < 5).length;
+        sourceRows.forEach((row) => addTrend(row.date_label, row.refunds, row.items_refunded));
+        return {
+          cards: [
+            { label: "退款金额", value: formatRp(sourceRows.reduce((sum, row) => sum + row.refunds, 0)), note: "交易归因表里的 Refunds 汇总。" },
+            { label: "退款件数", value: formatInt(sourceRows.reduce((sum, row) => sum + row.items_refunded, 0)), note: "交易归因表里的 Items refunded 汇总。" },
+            { label: "退货率", value: formatPct(sourceRows.reduce((sum, row) => sum + row.items_sold, 0) ? sourceRows.reduce((sum, row) => sum + row.items_refunded, 0) / sourceRows.reduce((sum, row) => sum + row.items_sold, 0) * 100 : 0), note: "按 refunded items / items sold 计算。" },
+            { label: "高退货达人", value: formatInt(rows.filter((row) => row.entity_type === "达人" && row.refund_rate >= 20).length), note: "退货率 >= 20% 的达人数量。" },
+            { label: "高退货视频", value: formatInt(rows.filter((row) => row.entity_type === "视频" && row.refund_rate >= 20).length), note: "退货率 >= 20% 的视频数量。" },
+            { label: "小样本记录", value: formatInt(lowSampleCount), note: "items sold < 5，建议谨慎解读。" },
+            { label: "异常口径记录", value: formatInt(anomalyCount), note: "退货率 > 100%，通常是跨期退款。" }
+          ],
+          trend: [...trendMap.values()].sort((a, b) => a.date.localeCompare(b.date)).slice(-14),
+          brands,
+          levels,
+          periods
+        };
+      }
+
+      rows.forEach((row) => addTrend(row.date_label, row.vv, row.txn_gmv));
+      return {
+        cards: [
+          { label: "联动视频数", value: formatInt(rows.length), note: "同时存在播放与交易归因的视频数。" },
+          { label: "联动 VV", value: formatInt(rows.reduce((sum, row) => sum + row.vv, 0)), note: "联动视频总播放量。" },
+          { label: "联动 GMV", value: formatRp(rows.reduce((sum, row) => sum + row.txn_gmv, 0)), note: "联动视频归因 GMV。" },
+          { label: "联动订单", value: formatInt(rows.reduce((sum, row) => sum + row.txn_orders, 0)), note: "联动视频归因订单。" },
+          { label: "平均 CTR", value: formatPct(rows.length ? rows.reduce((sum, row) => sum + row.ctr, 0) / rows.length : 0), note: "联动视频点击率平均值。" },
+          { label: "平均完播率", value: formatPct(rows.length ? rows.reduce((sum, row) => sum + row.finish_rate, 0) / rows.length : 0), note: "联动视频完播率平均值。" }
+        ],
+        trend: [...trendMap.values()].sort((a, b) => a.date.localeCompare(b.date)).slice(-14),
+        brands,
+        levels,
+        periods
+      };
+    }
+
+    function renderStats() {
+      refs.statsSection.innerHTML = state.summary.cards.map((card) => `
+        <div class="panel card stat-card">
+          <small>${card.label}</small>
+          <div class="value">${card.value}</div>
+          <div class="note">${card.note}</div>
+        </div>
+      `).join("");
+    }
+
+    function renderHealth() {
+      const healthItems = [
+        { title: "交易归因表", value: `${formatInt(state.raw.transactionRows.length)} 行`, note: `${formatInt(state.files.transaction.length)} 个文件，支持多品牌拼接。` },
+        { title: "播放表现表", value: `${formatInt(state.raw.performanceRows.length)} 行`, note: `${formatInt(state.files.performance.length)} 个文件，用于播放内容分析。` },
+        { title: "产品生命周期表", value: `${formatInt(state.raw.lifecycleRows.length)} 行`, note: `${formatInt(state.files.lifecycle.length)} 个文件，通过 PID 补产品阶段。` },
+        { title: "达人等级表", value: `${formatInt(state.raw.creatorRows.length)} 行`, note: `${formatInt(state.files.creator.length)} 个文件，通过达人名补等级。` }
+      ];
+      const noticeItems = state.notices.map((text) => ({
+        title: "上传提醒",
+        value: "已跳过",
+        note: text
+      }));
+      refs.healthList.innerHTML = [...healthItems, ...noticeItems].map((item) => `
+        <div class="list-item">
+          <strong>${item.title}</strong>
+          <span class="pill ${item.title === "上传提醒" ? "" : "green"}">${item.value}</span>
+          <span class="mini">${item.note}</span>
+        </div>
+      `).join("");
+    }
+
+    function renderIssues(rows) {
+      if (state.currentView === "transaction") {
+        refs.issueTitle.textContent = "未匹配产品阶段";
+        refs.issueDesc.textContent = "交易归因里高价值但还没在产品生命周期表中命中的 PID。";
+        const issues = rows
+          .filter((row) => !row.lifecycle_matched)
+          .reduce((map, row) => {
+            const key = row.product_id || row.product_name_raw;
+            const current = map.get(key) || { label: row.product_name_raw || row.product_id, gmv: 0, rows: 0 };
+            current.gmv += row.gmv;
+            current.rows += 1;
+            map.set(key, current);
+            return map;
+          }, new Map());
+        const list = [...issues.values()].sort((a, b) => b.gmv - a.gmv).slice(0, 6);
+        refs.issueList.innerHTML = list.length ? list.map((item) => `
+          <div class="list-item">
+            <strong>${short(item.label, 68)}</strong>
+            <span class="pill">GMV ${formatRp(item.gmv)}</span>
+            <span class="mini">未匹配行数 ${formatInt(item.rows)}</span>
+          </div>
+        `).join("") : `<div class="empty">当前筛选范围内没有未匹配产品阶段的问题。</div>`;
+        return;
+      }
+
+      if (state.currentView === "performance") {
+        refs.issueTitle.textContent = "高播放异常视频";
+        refs.issueDesc.textContent = "按当前筛选范围，优先看高播放但 Diagnosis 异常或 CTR / 完播偏弱的视频。";
+        const list = rows
+          .slice()
+          .sort((a, b) => b.vv - a.vv)
+          .filter((row) => row.diagnosis && normalizeText(row.diagnosis) !== "tidak ada masalah")
+          .slice(0, 6);
+        refs.issueList.innerHTML = list.length ? list.map((item) => `
+          <div class="list-item">
+            <strong>${item.creator_name}</strong>
+            <span class="pill">VV ${formatInt(item.vv)}</span>
+            <span class="mini">${item.diagnosis}</span>
+          </div>
+        `).join("") : `<div class="empty">当前筛选范围内没有明显的播放异常视频。</div>`;
+        return;
+      }
+
+      if (state.currentView === "lifecycle") {
+        refs.issueTitle.textContent = "生命周期覆盖短板";
+        refs.issueDesc.textContent = "优先看默认 L3 比重高、但已经有播放或成交的生命周期分组。";
+        const issues = rows
+          .map((row) => {
+            const l3 = (row.level_breakdown || []).find((item) => item.level === "L3");
+            return { ...row, l3_creator_count: l3?.creator_count || 0, l3_vv: l3?.vv || 0, l3_txn_gmv: l3?.txn_gmv || 0 };
+          })
+          .filter((row) => row.l3_creator_count > 0 && (row.l3_vv > 0 || row.l3_txn_gmv > 0))
+          .slice()
+          .sort((a, b) => (b.l3_txn_gmv + b.l3_vv) - (a.l3_txn_gmv + a.l3_vv))
+          .slice(0, 6);
+        refs.issueList.innerHTML = issues.length ? issues.map((item) => `
+          <div class="list-item">
+            <strong>${item.product_period} / ${item.brand}</strong>
+            <span class="pill">L3 达人 ${formatInt(item.l3_creator_count)} 个</span>
+            <span class="mini">VV ${formatInt(item.l3_vv)} / GMV ${formatRp(item.l3_txn_gmv)}</span>
+          </div>
+        `).join("") : `<div class="empty">当前筛选范围内没有需要优先补达人等级的生命周期分组。</div>`;
+        return;
+      }
+
+      if (state.currentView === "refund") {
+        refs.issueTitle.textContent = "高退货风险";
+        refs.issueDesc.textContent = "优先看退货率高，同时订单量不低的达人和视频。";
+        const issues = rows
+          .filter((row) => row.orders >= 3 && row.refund_rate > 0)
+          .slice()
+          .sort((a, b) => {
+            if (b.refund_rate !== a.refund_rate) return b.refund_rate - a.refund_rate;
+            return b.refunds - a.refunds;
+          })
+          .slice(0, 6);
+        refs.issueList.innerHTML = issues.length ? issues.map((item) => `
+          <div class="list-item">
+            <strong>${item.entity_type} / ${item.video_id || item.creator_name}</strong>
+            <span class="pill">退货率 ${formatPct(item.refund_rate)}</span>
+            <span class="mini">Orders ${formatInt(item.orders)} / Refunds ${formatRp(item.refunds)}</span>
+          </div>
+        `).join("") : `<div class="empty">当前筛选范围内没有明显高退货风险的达人或视频。</div>`;
+        return;
+      }
+
+      refs.issueTitle.textContent = "联动机会点";
+      refs.issueDesc.textContent = "优先看高播放低成交和低播放高成交两类视频。";
+      const sorted = rows.slice().sort((a, b) => b.vv - a.vv);
+      const list = sorted.slice(0, 6);
+      refs.issueList.innerHTML = list.length ? list.map((item) => `
+        <div class="list-item">
+          <strong>${item.creator_name}</strong>
+          <span class="pill">VV ${formatInt(item.vv)} / GMV ${formatRp(item.txn_gmv)}</span>
+          <span class="mini">CTR ${formatPct(item.ctr)} / 完播 ${formatPct(item.finish_rate)}</span>
+        </div>
+      `).join("") : `<div class="empty">当前筛选范围内没有联动视频。</div>`;
+    }
+
+    function renderActions() {
+      const actions = state.currentView === "transaction"
+        ? [
+            "先补高 GMV 但未命中产品生命周期的 PID。",
+            "优先扩充未命中达人等级但有成交的达人。",
+            "按产品阶段筛选后，再看各阶段 GMV 和订单分布。",
+            "后续增加品牌切换时，优先看每个品牌的头部商品。"
+          ]
+        : state.currentView === "performance"
+          ? [
+              "优先看高 VV 但 CTR / 完播偏低的视频，调整内容题材。",
+              "把高播放达人映射到达人等级表，减少默认 L3。",
+              "按品牌筛选查看哪一类内容更能带来高播放。",
+              "后续把异常 Diagnosis 单独做预警面板。"
+            ]
+          : state.currentView === "lifecycle"
+            ? [
+                "优先补齐有播放或成交但仍为 L3 的生命周期达人映射。",
+                "同一生命周期内，对比 L1/L2/L3 的达人数和视频产出，找出层级覆盖缺口。",
+                "先看高 VV 但 GMV 偏弱的生命周期分组，排查挂车商品和内容适配。",
+                "对高 GMV 且达人覆盖少的生命周期，补更多同层级达人测试。"
+              ]
+          : state.currentView === "refund"
+            ? [
+                "优先处理退货率高且订单量不低的达人，先看内容承诺和商品一致性。",
+                "把高退货视频单独拉出来，检查视频脚本是否存在夸大描述。",
+                "同一个达人若多个视频都高退货，优先暂停同类产品继续放量。",
+                "同时观察退款金额率和退货率，避免只看金额漏掉件数问题。"
+              ]
+          : [
+              "优先看高播放低成交视频，排查挂车商品与内容匹配度。",
+              "优先看低播放高成交视频，提炼可复制的内容模版。",
+              "达人层面同时比较内容能力和带货能力，做分层运营。",
+              "后续把联动分析做成自动推荐列表。"
+            ];
+      refs.actionList.innerHTML = actions.map((text, index) => `
+        <div class="list-item">
+          <strong>${index + 1}. ${text}</strong>
+        </div>
+      `).join("");
+    }
+
+    function renderTrend(rows) {
+      const trend = state.summary.trend || [];
+      refs.trendDesc.textContent = state.currentView === "transaction"
+        ? "主轴看归因 GMV，副轴看订单，帮助判断带货峰值。"
+        : state.currentView === "performance"
+          ? "主轴看 VV，副轴看归因 GMV，帮助判断播放和转化同步性。"
+          : state.currentView === "lifecycle"
+            ? "按生命周期阶段汇总，主轴看覆盖达人数，副轴看归因 GMV。"
+            : state.currentView === "refund"
+              ? "主轴看退款金额，副轴看退款件数，帮助识别退款风险集中日期。"
+            : "主轴看 VV，副轴看联动 GMV，帮助识别高播放低转化与高转化视频。";
+      refs.trendTag.textContent = state.currentView === "transaction"
+        ? "GMV / Orders"
+        : state.currentView === "lifecycle"
+          ? "Creators / GMV"
+          : state.currentView === "refund"
+            ? "Refunds / Items"
+          : "VV / GMV";
+      if (!trend.length) {
+        refs.trendChart.innerHTML = `<div class="empty">当前视图没有可绘制的趋势数据。</div>`;
+        return;
+      }
+      const maxPrimary = Math.max(...trend.map((item) => item.primary), 1);
+      const maxSecondary = Math.max(...trend.map((item) => item.secondary), 1);
+      refs.trendChart.innerHTML = trend.map((item) => `
+        <div class="bar-group">
+          <div class="bar-stack">
+            <div class="bar primary" style="height:${Math.max(12, item.primary / maxPrimary * 180)}px"></div>
+            <div class="bar secondary" style="height:${Math.max(12, item.secondary / maxSecondary * 180)}px"></div>
+          </div>
+          <div class="bar-label">${item.date}</div>
+        </div>
+      `).join("");
+    }
+
+    function renderRankings(rows) {
+      if (state.currentView === "transaction") {
+        refs.rankLeftTitle.textContent = "Top 达人";
+        refs.rankLeftDesc.textContent = "按归因 GMV 排序。";
+        refs.rankRightTitle.textContent = "Top 产品";
+        refs.rankRightDesc.textContent = "按归因 GMV 排序。";
+        const creatorMap = new Map();
+        const productMap = new Map();
+        rows.forEach((row) => {
+          const creator = creatorMap.get(row.creator_name) || { label: row.creator_name, sub: `${row.creator_level} / ${row.brand}`, metric: 0 };
+          creator.metric += row.gmv;
+          creatorMap.set(row.creator_name, creator);
+
+          const productKey = row.product_id || row.product_name_raw;
+          const product = productMap.get(productKey) || {
+            label: row.product_name_cn || row.product_name_raw || row.product_id,
+            sub: `${row.product_period || "未设置阶段"} / ${row.product_id || "无 PID"}`,
+            metric: 0
+          };
+          product.metric += row.gmv;
+          productMap.set(productKey, product);
+        });
+        renderRankList(refs.rankLeftList, [...creatorMap.values()].sort((a, b) => b.metric - a.metric).slice(0, 6), formatRp);
+        renderRankList(refs.rankRightList, [...productMap.values()].sort((a, b) => b.metric - a.metric).slice(0, 6), formatRp);
+        return;
+      }
+
+      if (state.currentView === "performance") {
+        refs.rankLeftTitle.textContent = "Top 达人";
+        refs.rankLeftDesc.textContent = "按 VV 排序。";
+        refs.rankRightTitle.textContent = "Top 视频";
+        refs.rankRightDesc.textContent = "按 VV 排序。";
+        const creatorMap = new Map();
+        rows.forEach((row) => {
+          const creator = creatorMap.get(row.creator_name) || { label: row.creator_name, sub: `${row.creator_level} / ${row.brand}`, metric: 0 };
+          creator.metric += row.vv;
+          creatorMap.set(row.creator_name, creator);
+        });
+        const videos = rows
+          .slice()
+          .sort((a, b) => b.vv - a.vv)
+          .slice(0, 6)
+          .map((row) => ({
+            label: row.creator_name,
+            sub: `${row.video_id} / CTR ${formatPct(row.ctr)} / 完播 ${formatPct(row.finish_rate)}`,
+            metric: row.vv
+          }));
+        renderRankList(refs.rankLeftList, [...creatorMap.values()].sort((a, b) => b.metric - a.metric).slice(0, 6), formatInt);
+        renderRankList(refs.rankRightList, videos, formatInt);
+        return;
+      }
+
+      if (state.currentView === "lifecycle") {
+        refs.rankLeftTitle.textContent = "Top 生命周期";
+        refs.rankLeftDesc.textContent = "按归因 GMV 排序。";
+        refs.rankRightTitle.textContent = "Top 产品";
+        refs.rankRightDesc.textContent = "按归因 GMV 排序。";
+        const periodMap = new Map();
+        const productRows = [];
+        rows.forEach((row) => {
+          const current = periodMap.get(row.product_period) || { label: row.product_period, sub: row.brand === "UNKNOWN" ? "全部品牌" : row.brand, metric: 0 };
+          current.metric += row.txn_gmv;
+          periodMap.set(row.product_period, current);
+          (row.product_breakdown || []).forEach((product) => {
+            productRows.push({
+              label: product.product_name_cn || product.product_name_raw || product.product_id || "未识别产品",
+              sub: `${row.product_period} / ${row.brand} / 达人 ${formatInt(product.creator_count)}`,
+              metric: product.txn_gmv
+            });
+          });
+        });
+        renderRankList(refs.rankLeftList, [...periodMap.values()].sort((a, b) => b.metric - a.metric).slice(0, 6), formatRp);
+        renderRankList(refs.rankRightList, productRows.sort((a, b) => b.metric - a.metric).slice(0, 6), formatRp);
+        return;
+      }
+
+      if (state.currentView === "refund") {
+        refs.rankLeftTitle.textContent = "高退货达人";
+        refs.rankLeftDesc.textContent = "按退货率排序。";
+        refs.rankRightTitle.textContent = "高退货视频";
+        refs.rankRightDesc.textContent = "按退货率排序。";
+        const creatorRows = rows
+          .filter((row) => row.entity_type === "达人")
+          .slice()
+          .sort((a, b) => b.refund_rate - a.refund_rate)
+          .slice(0, 6)
+          .map((row) => ({
+            label: row.creator_name,
+            sub: `${row.brand} / ${row.creator_level} / Orders ${formatInt(row.orders)}`,
+            metric: row.refund_rate
+          }));
+        const videoRows = rows
+          .filter((row) => row.entity_type === "视频")
+          .slice()
+          .sort((a, b) => b.refund_rate - a.refund_rate)
+          .slice(0, 6)
+          .map((row) => ({
+            label: row.video_id,
+            sub: `${row.creator_name} / ${row.brand} / Orders ${formatInt(row.orders)}`,
+            metric: row.refund_rate
+          }));
+        renderRankList(refs.rankLeftList, creatorRows, formatPct);
+        renderRankList(refs.rankRightList, videoRows, formatPct);
+        return;
+      }
+
+      refs.rankLeftTitle.textContent = "高播放低转化";
+      refs.rankLeftDesc.textContent = "按 VV 排序，联动 GMV 偏低。";
+      refs.rankRightTitle.textContent = "低播放高转化";
+      refs.rankRightDesc.textContent = "按 GMV 排序，播放量相对偏低。";
+      const highPlayLowTxn = rows
+        .slice()
+        .sort((a, b) => b.vv - a.vv)
+        .slice(0, 6)
+        .map((row) => ({
+          label: row.creator_name,
+          sub: `${row.video_id} / GMV ${formatRp(row.txn_gmv)}`,
+          metric: row.vv
+        }));
+      const lowPlayHighTxn = rows
+        .slice()
+        .sort((a, b) => b.txn_gmv - a.txn_gmv)
+        .slice(0, 6)
+        .map((row) => ({
+          label: row.creator_name,
+          sub: `${row.video_id} / VV ${formatInt(row.vv)}`,
+          metric: row.txn_gmv
+        }));
+      renderRankList(refs.rankLeftList, highPlayLowTxn, formatInt);
+      renderRankList(refs.rankRightList, lowPlayHighTxn, formatRp);
+    }
+
+    function renderRankList(node, rows, formatter) {
+      node.innerHTML = rows.length ? rows.map((row, index) => `
+        <div class="rank-item">
+          <div class="rank-no">${index + 1}</div>
+          <div>
+            <strong>${short(row.label, 34)}</strong>
+            <div class="mini">${row.sub}</div>
+          </div>
+          <div class="pill">${formatter(row.metric)}</div>
+        </div>
+      `).join("") : `<div class="empty">当前筛选范围没有排行数据。</div>`;
+    }
+
+    function renderProductCell(primary, secondary = "") {
+      const main = String(primary || secondary || "").trim();
+      const extra = String(secondary || "").trim();
+      if (!main) return '<span class="mini">无产品名</span>';
+      const hasExtra = extra && normalizeText(extra) !== normalizeText(main);
+      const fullText = hasExtra ? `${main}\n${extra}` : main;
+      return `
+        <details class="cell-details">
+          <summary>${escapeHtml(short(main, 26))}</summary>
+          <div class="full-text">${escapeHtml(fullText).replace(/\n/g, "<br>")}</div>
+        </details>
+      `;
+    }
+
+    function renderRefundFlags(row) {
+      const flags = [];
+      if (row.items_sold < 5) flags.push('<span class="pill warn">小样本</span>');
+      if (row.refund_rate > 100) flags.push('<span class="pill warn">跨期/异常口径</span>');
+      if (row.refund_rate >= 20 && row.refund_rate <= 100) flags.push('<span class="pill">高退货率</span>');
+      return flags.join(" ") || '<span class="mini">正常范围</span>';
+    }
+
+    function renderRefundRateCell(row) {
+      return `
+        <div>${formatPct(row.refund_rate)}</div>
+        <div class="mini" style="margin-top:6px;">金额率 ${formatPct(row.refund_gmv_rate)}</div>
+      `;
+    }
+
+    function renderLevelBreakdownCell(levels) {
+      if (!levels || !levels.length) return '<span class="mini">无层级数据</span>';
+      return `
+        <div class="detail-list">
+          ${levels.map((item) => `
+            <div class="detail-row">
+              <strong>${item.level}</strong>
+              <div class="sub-metric">达人 ${formatInt(item.creator_count)} / 视频 ${formatInt(item.video_count)}</div>
+              <div class="sub-metric">VV ${formatInt(item.vv)} / GMV ${formatRp(item.txn_gmv)} / Orders ${formatInt(item.txn_orders)}</div>
+            </div>
+          `).join("")}
+        </div>
+      `;
+    }
+
+    function renderProductBreakdownCell(products) {
+      if (!products || !products.length) return '<span class="mini">无产品数据</span>';
+      return `
+        <details class="cell-details">
+          <summary>${products.length} 个产品，点击查看</summary>
+          <div class="detail-list">
+            ${products.map((item) => `
+              <div class="detail-row">
+                <strong>${escapeHtml(item.product_name_cn || item.product_name_raw || item.product_id || "未识别产品")}</strong>
+              <div class="sub-metric">PID ${escapeHtml(item.product_id || "无")} / 达人 ${formatInt(item.creator_count)} / 视频 ${formatInt(item.video_count)}</div>
+              <div class="sub-metric">VV ${formatInt(item.vv)} / GMV ${formatRp(item.txn_gmv)} / Orders ${formatInt(item.txn_orders)}</div>
+              ${(item.level_breakdown && item.level_breakdown.length) ? `
+                <div class="detail-list">
+                  ${item.level_breakdown.map((level) => `
+                    <div class="detail-row">
+                      <strong>${level.level}</strong>
+                      <div class="sub-metric">达人 ${formatInt(level.creator_count)} / 视频 ${formatInt(level.video_count)}</div>
+                      <div class="sub-metric">VV ${formatInt(level.vv)} / GMV ${formatRp(level.txn_gmv)} / Orders ${formatInt(level.txn_orders)}</div>
+                    </div>
+                  `).join("")}
+                </div>
+              ` : ""}
+            </div>
+          `).join("")}
+          </div>
+        </details>
+      `;
+    }
+
+    function renderFilterOptions(rows) {
+      const brands = [...new Set(rows.map((row) => row.brand).filter(Boolean))].sort();
+      const levels = (state.currentView === "lifecycle" || state.currentView === "refund")
+        ? [...new Set(
+            (
+              state.currentView === "refund"
+                ? state.merged.transactionRows
+                : [...state.merged.transactionRows, ...state.merged.performanceRows]
+            )
+              .map((row) => row.creator_level)
+              .filter(Boolean)
+          )].sort()
+        : [...new Set(rows.map((row) => row.creator_level).filter(Boolean))].sort();
+      const periods = (state.currentView === "refund")
+        ? [...new Set(state.merged.transactionRows.map((row) => row.product_period).filter(Boolean))].sort()
+        : [...new Set(rows.map((row) => row.product_period).filter(Boolean))].sort();
+      refs.brandFilter.innerHTML = `<option value="">全部品牌</option>${brands.map((brand) => `<option value="${brand}">${brand}</option>`).join("")}`;
+      refs.levelFilter.innerHTML = `<option value="">全部达人等级</option>${levels.map((level) => `<option value="${level}">${level}</option>`).join("")}`;
+      refs.periodFilter.innerHTML = `<option value="">全部产品阶段</option>${periods.map((period) => `<option value="${period}">${period}</option>`).join("")}`;
+      enableControls();
+    }
+
+    function getTableConfig() {
+      if (state.currentView === "transaction") {
+        return {
+          title: "交易明细",
+          desc: "交易归因口径，粒度为视频 x 商品归因记录。",
+          tag: "Transaction",
+          headers: ["Brand", "Creator", "Level", "Product Name", "PID", "Period", "GMV", "Orders", "Items Sold", "Video ID"],
+          rowBuilder: (row) => [
+            row.brand,
+            row.creator_name,
+            `<span class="pill ${row.creator_level === "L3" ? "" : "green"}">${row.creator_level}</span>`,
+            renderProductCell(row.product_name_cn, row.product_name_raw),
+            row.product_id,
+            row.product_period || '<span class="mini">未设置</span>',
+            formatRp(row.gmv),
+            formatInt(row.orders),
+            formatInt(row.items_sold),
+            row.video_id
+          ]
+        };
+      }
+
+      if (state.currentView === "performance") {
+        return {
+          title: "播放明细",
+          desc: "视频播放表现口径，重点看 VV、互动、CTR、完播率。",
+          tag: "Performance",
+          headers: ["Brand", "Creator", "Level", "Product Name", "VV", "Likes", "Comments", "Shares", "CTR", "Finish Rate", "Video ID"],
+          rowBuilder: (row) => [
+            row.brand,
+            row.creator_name,
+            `<span class="pill ${row.creator_level === "L3" ? "" : "green"}">${row.creator_level}</span>`,
+            renderProductCell(row.product_name_cn, row.product_name_raw || stripPidFromProducts(row.products_text)),
+            formatInt(row.vv),
+            formatInt(row.likes),
+            formatInt(row.comments),
+            formatInt(row.shares),
+            formatPct(row.ctr),
+            formatPct(row.finish_rate),
+            row.video_id
+          ]
+        };
+      }
+
+      if (state.currentView === "lifecycle") {
+        return {
+          title: "生命周期分层明细",
+          desc: "默认显示同一生命周期的汇总，展开后查看该生命周期内不同产品的具体数据。",
+          tag: "Lifecycle",
+          headers: ["Brand", "Period", "Level Breakdown", "Creators", "Products", "Videos", "VV", "Engagement", "Txn GMV", "Txn Orders", "Product Breakdown"],
+          rowBuilder: (row) => [
+            row.brand,
+            row.product_period,
+            renderLevelBreakdownCell(row.level_breakdown),
+            formatInt(row.creator_count),
+            formatInt(row.product_count),
+            formatInt(row.video_count),
+            formatInt(row.vv),
+            formatInt(row.engagement),
+            formatRp(row.txn_gmv),
+            formatInt(row.txn_orders),
+            renderProductBreakdownCell(row.product_breakdown)
+          ]
+        };
+      }
+
+      if (state.currentView === "refund") {
+        return {
+          title: "Refund 明细",
+          desc: "同时看达人和视频两个层级的订单、退款金额、退款件数、退货率，并标记小样本和跨期退款口径。",
+          tag: "Refund",
+          headers: ["Type", "Brand", "Creator", "Video ID", "Level", "Videos", "Orders", "Items Sold", "Refunds", "Items Refunded", "Return Rate", "Flags"],
+          rowBuilder: (row) => [
+            row.entity_type,
+            row.brand,
+            row.creator_name || '<span class="mini">无</span>',
+            row.video_id || '<span class="mini">达人汇总</span>',
+            `<span class="pill ${row.creator_level === "L3" ? "" : "green"}">${row.creator_level || "L3"}</span>`,
+            formatInt(row.video_count),
+            formatInt(row.orders),
+            formatInt(row.items_sold),
+            formatRp(row.refunds),
+            formatInt(row.items_refunded),
+            renderRefundRateCell(row),
+            renderRefundFlags(row)
+          ]
+        };
+      }
+
+      return {
+        title: "联动明细",
+        desc: "同一条视频同时存在播放表现和交易归因时的联动分析。",
+        tag: "Linkage",
+        headers: ["Brand", "Creator", "Level", "Product Name", "VV", "CTR", "Finish Rate", "Txn GMV", "Txn Orders", "Period", "Video ID"],
+        rowBuilder: (row) => [
+          row.brand,
+          row.creator_name,
+          `<span class="pill ${row.creator_level === "L3" ? "" : "green"}">${row.creator_level}</span>`,
+          renderProductCell(row.product_name_cn, row.product_name_raw),
+          formatInt(row.vv),
+          formatPct(row.ctr),
+          formatPct(row.finish_rate),
+          formatRp(row.txn_gmv),
+          formatInt(row.txn_orders),
+          row.product_period || '<span class="mini">未设置</span>',
+          row.video_id
+        ]
+      };
+    }
+
+    function renderTable(rows) {
+      const config = getTableConfig();
+      refs.tableTitle.textContent = config.title;
+      refs.tableDesc.textContent = config.desc;
+      refs.tableTag.textContent = config.tag;
+      refs.tableHead.innerHTML = `<tr>${config.headers.map((header) => `<th>${header}</th>`).join("")}</tr>`;
+
+      if (!rows.length) {
+        refs.detailTable.innerHTML = `<tr><td colspan="${config.headers.length}" class="empty">当前筛选条件下没有数据。</td></tr>`;
+        refs.pageInfo.textContent = "当前没有数据";
+        refs.prevPageBtn.disabled = true;
+        refs.nextPageBtn.disabled = true;
+        return;
+      }
+
+      const totalPages = Math.max(1, Math.ceil(rows.length / state.pageSize));
+      state.currentPage = Math.min(state.currentPage, totalPages);
+      const start = (state.currentPage - 1) * state.pageSize;
+      const pageRows = rows.slice(start, start + state.pageSize);
+      refs.detailTable.innerHTML = pageRows.map((row) => `
+        <tr>${config.rowBuilder(row).map((cell) => `<td>${cell}</td>`).join("")}</tr>
+      `).join("");
+      refs.pageInfo.textContent = `第 ${state.currentPage} / ${totalPages} 页，共 ${formatInt(rows.length)} 条`;
+      refs.prevPageBtn.disabled = state.currentPage <= 1;
+      refs.nextPageBtn.disabled = state.currentPage >= totalPages;
+    }
+
+    function applyFilters() {
+      const filters = getFilterState();
+      if (state.currentView === "lifecycle") {
+        state.filteredRows = buildLifecycleFilteredRows(filters);
+        state.currentPage = 1;
+        state.summary = buildCurrentSummary(state.filteredRows);
+        renderStats();
+        renderIssues(state.filteredRows);
+        renderActions();
+        renderTrend(state.filteredRows);
+        renderRankings(state.filteredRows);
+        renderTable(state.filteredRows);
+        return;
+      }
+
+      if (state.currentView === "refund") {
+        state.filteredRows = buildRefundFilteredRows(filters);
+        state.currentPage = 1;
+        state.summary = buildCurrentSummary(state.filteredRows);
+        renderStats();
+        renderIssues(state.filteredRows);
+        renderActions();
+        renderTrend(state.filteredRows);
+        renderRankings(state.filteredRows);
+        renderTable(state.filteredRows);
+        return;
+      }
+
+      const sourceRows = getCurrentRows();
+      state.filteredRows = sourceRows.filter((row) => {
+        const keywordFields = [
+          row.brand,
+          row.creator_name,
+          row.product_name_raw,
+          row.product_name_cn,
+          row.product_id,
+          row.video_id
+        ];
+        const keywordHit = !filters.keyword || keywordFields.some((field) => normalizeText(field).includes(filters.keyword));
+        const brandHit = !filters.brand || row.brand === filters.brand;
+        const levelHit = !filters.level || row.creator_level === filters.level;
+        const periodHit = !filters.period || row.product_period === filters.period;
+        const dateField = state.currentView === "linkage" ? (row.txn_date_value || row.date_value) : row.date_value;
+        const startHit = !filters.startDate || (dateField && dateField >= filters.startDate);
+        const endHit = !filters.endDate || (dateField && dateField <= filters.endDate);
+        return keywordHit && brandHit && levelHit && periodHit && startHit && endHit;
+      });
+      state.currentPage = 1;
+      state.summary = buildCurrentSummary(state.filteredRows);
+      renderStats();
+      renderIssues(state.filteredRows);
+      renderActions();
+      renderTrend(state.filteredRows);
+      renderRankings(state.filteredRows);
+      renderTable(state.filteredRows);
+    }
+
+    function buildCsv(rows) {
+      if (!rows.length) return "";
+      const columns = Object.keys(rows[0]).filter((key) => !key.startsWith("_"));
+      const escapeCell = (value) => {
+        const text = String(value ?? "");
+        return /[",\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
+      };
+      return [
+        columns.join(","),
+        ...rows.map((row) => columns.map((col) => escapeCell(row[col])).join(","))
+      ].join("\n");
+    }
+
+    function downloadCurrentCsv() {
+      const rows = state.filteredRows.length ? state.filteredRows : getCurrentRows();
+      const csv = buildCsv(rows);
+      const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = `${state.currentView}_view.csv`;
+      link.click();
+      URL.revokeObjectURL(url);
+    }
+
+    async function handleProcess() {
+      refs.processBtn.disabled = true;
+      refs.processBtn.textContent = "处理中...";
+      try {
+        state.notices = [];
+        await loadTransactionFiles();
+        await loadPerformanceFiles();
+        await loadLifecycleFiles();
+        await loadCreatorFiles();
+        const dimensions = buildDimensionMaps();
+        buildTransactionRows(dimensions);
+        buildPerformanceRows(dimensions);
+        buildLifecycleRows();
+        buildRefundRows();
+        buildLinkageRows();
+        refs.viewHint.textContent = VIEW_HINTS[state.currentView];
+        renderHealth();
+        renderFilterOptions(getCurrentRows());
+        applyFilters();
+      } catch (error) {
+        alert(error.message);
+      } finally {
+        refs.processBtn.disabled = false;
+        refs.processBtn.textContent = "生成监控结果";
+      }
+    }
+
+    function updateProcessState() {
+      const ready = state.files.transaction.length && state.files.performance.length && state.files.lifecycle.length && state.files.creator.length;
+      refs.processBtn.disabled = !ready;
+    }
+
+    function bindFileInput(input, key, statusNode, label) {
+      input.addEventListener("change", () => {
+        state.files[key] = [...input.files];
+        const text = state.files[key].length ? `${label} ${state.files[key].length} 个文件` : "等待上传";
+        setStatus(statusNode, state.files[key].length ? "ready" : "wait", text);
+        updateProcessState();
+      });
+    }
+
+    bindFileInput(refs.transactionFiles, "transaction", refs.transactionStatus, "交易表");
+    bindFileInput(refs.performanceFiles, "performance", refs.performanceStatus, "播放表");
+    bindFileInput(refs.lifecycleFiles, "lifecycle", refs.lifecycleStatus, "产品表");
+    bindFileInput(refs.creatorFiles, "creator", refs.creatorStatus, "达人表");
+
+    refs.processBtn.addEventListener("click", handleProcess);
+    refs.downloadBtn.addEventListener("click", downloadCurrentCsv);
+    refs.searchInput.addEventListener("input", applyFilters);
+    refs.brandFilter.addEventListener("change", applyFilters);
+    refs.levelFilter.addEventListener("change", applyFilters);
+    refs.periodFilter.addEventListener("change", applyFilters);
+    refs.startDateFilter.addEventListener("change", applyFilters);
+    refs.endDateFilter.addEventListener("change", applyFilters);
+    refs.resetBtn.addEventListener("click", () => {
+      refs.searchInput.value = "";
+      refs.brandFilter.value = "";
+      refs.levelFilter.value = "";
+      refs.periodFilter.value = "";
+      refs.startDateFilter.value = "";
+      refs.endDateFilter.value = "";
+      applyFilters();
+    });
+    refs.prevPageBtn.addEventListener("click", () => {
+      if (state.currentPage > 1) {
+        state.currentPage -= 1;
+        renderTable(state.filteredRows);
+      }
+    });
+    refs.nextPageBtn.addEventListener("click", () => {
+      const totalPages = Math.max(1, Math.ceil(state.filteredRows.length / state.pageSize));
+      if (state.currentPage < totalPages) {
+        state.currentPage += 1;
+        renderTable(state.filteredRows);
+      }
+    });
+
+    refs.tabButtons.forEach((button) => {
+      button.addEventListener("click", () => {
+        refs.tabButtons.forEach((node) => node.classList.remove("active"));
+        button.classList.add("active");
+        state.currentView = button.dataset.view;
+        refs.viewHint.textContent = VIEW_HINTS[state.currentView];
+        if (getCurrentRows().length) {
+          renderFilterOptions(getCurrentRows());
+          applyFilters();
+        }
+      });
+    });
+  </script>
+</body>
+</html>
