@@ -323,6 +323,11 @@
       color: var(--ink);
     }
 
+    select[multiple] {
+      min-height: 116px;
+      padding: 10px;
+    }
+
     .table-wrap {
       overflow: auto;
       max-height: 520px;
@@ -603,15 +608,9 @@
 
       <div class="filter-grid">
         <input id="searchInput" type="search" placeholder="搜索达人 / 产品 / 视频 / PID" disabled>
-        <select id="brandFilter" disabled>
-          <option value="">全部品牌</option>
-        </select>
-        <select id="levelFilter" disabled>
-          <option value="">全部达人等级</option>
-        </select>
-        <select id="periodFilter" disabled>
-          <option value="">全部产品阶段</option>
-        </select>
+        <select id="brandFilter" multiple size="4" disabled title="品牌多选，按住 Command 或 Shift 可连续选择"></select>
+        <select id="levelFilter" multiple size="4" disabled title="达人等级多选，按住 Command 或 Shift 可连续选择"></select>
+        <select id="periodFilter" multiple size="4" disabled title="产品阶段多选，按住 Command 或 Shift 可连续选择"></select>
         <input id="startDateFilter" type="date" disabled>
         <input id="endDateFilter" type="date" disabled>
         <button id="resetBtn" class="secondary" disabled>重置筛选</button>
@@ -1569,12 +1568,22 @@
             : state.merged.linkageRows;
     }
 
+    function getSelectedValues(selectNode) {
+      return [...selectNode.selectedOptions].map((option) => option.value).filter(Boolean);
+    }
+
+    function clearMultiSelect(selectNode) {
+      [...selectNode.options].forEach((option) => {
+        option.selected = false;
+      });
+    }
+
     function getFilterState() {
       return {
         keyword: normalizeText(refs.searchInput.value),
-        brand: refs.brandFilter.value,
-        level: refs.levelFilter.value,
-        period: refs.periodFilter.value,
+        brands: getSelectedValues(refs.brandFilter),
+        levels: getSelectedValues(refs.levelFilter),
+        periods: getSelectedValues(refs.periodFilter),
         startDate: refs.startDateFilter.value,
         endDate: refs.endDateFilter.value
       };
@@ -1583,9 +1592,9 @@
     function buildLifecycleFilteredRows(filters) {
       const matchesBase = (row) => {
         const periodValue = row.product_period || "未设置阶段";
-        const brandHit = !filters.brand || row.brand === filters.brand;
-        const levelHit = !filters.level || row.creator_level === filters.level;
-        const periodHit = !filters.period || periodValue === filters.period;
+        const brandHit = !filters.brands.length || filters.brands.includes(row.brand);
+        const levelHit = !filters.levels.length || filters.levels.includes(row.creator_level);
+        const periodHit = !filters.periods.length || filters.periods.includes(periodValue);
         const startHit = !filters.startDate || (row.date_value && row.date_value >= filters.startDate);
         const endHit = !filters.endDate || (row.date_value && row.date_value <= filters.endDate);
         return brandHit && levelHit && periodHit && startHit && endHit;
@@ -1609,9 +1618,9 @@
     function buildRefundFilteredRows(filters) {
       const baseRows = state.merged.transactionRows.filter((row) => {
         const periodValue = row.product_period || "未设置阶段";
-        const brandHit = !filters.brand || row.brand === filters.brand;
-        const levelHit = !filters.level || row.creator_level === filters.level;
-        const periodHit = !filters.period || periodValue === filters.period;
+        const brandHit = !filters.brands.length || filters.brands.includes(row.brand);
+        const levelHit = !filters.levels.length || filters.levels.includes(row.creator_level);
+        const periodHit = !filters.periods.length || filters.periods.includes(periodValue);
         const startHit = !filters.startDate || (row.date_value && row.date_value >= filters.startDate);
         const endHit = !filters.endDate || (row.date_value && row.date_value <= filters.endDate);
         return brandHit && levelHit && periodHit && startHit && endHit;
@@ -1975,7 +1984,8 @@
             label: row.product_name_raw || row.product_name_cn || row.product_id,
             sub: `${row.product_period || "未设置阶段"} / ${row.product_id || "无 PID"}`,
             metric: 0,
-            truncateLabel: false
+            collapsibleLabel: true,
+            secondaryLabel: row.product_name_cn && normalizeText(row.product_name_cn) !== normalizeText(row.product_name_raw) ? row.product_name_cn : ""
           };
           product.metric += row.gmv;
           productMap.set(productKey, product);
@@ -2025,7 +2035,9 @@
             productRows.push({
               label: product.product_name_cn || product.product_name_raw || product.product_id || "未识别产品",
               sub: `${row.product_period} / ${row.brand} / 达人 ${formatInt(product.creator_count)}`,
-              metric: product.txn_gmv
+              metric: product.txn_gmv,
+              collapsibleLabel: true,
+              secondaryLabel: product.product_name_raw
             });
           });
         });
@@ -2090,12 +2102,31 @@
       renderRankList(refs.rankRightList, lowPlayHighTxn, formatRp);
     }
 
+    function renderCollapsibleText(primary, secondary = "", previewLength = 28) {
+      const main = String(primary || secondary || "").trim();
+      const extra = String(secondary || "").trim();
+      if (!main) return '<span class="mini">无产品名</span>';
+      const hasExtra = extra && normalizeText(extra) !== normalizeText(main);
+      const summary = escapeHtml(short(main, previewLength));
+      const body = hasExtra
+        ? `${escapeHtml(main)}<br><span class="mini">${escapeHtml(extra)}</span>`
+        : escapeHtml(main);
+      return `
+        <details class="cell-details">
+          <summary>${summary}</summary>
+          <div class="full-text">${body}</div>
+        </details>
+      `;
+    }
+
     function renderRankList(node, rows, formatter) {
       node.innerHTML = rows.length ? rows.map((row, index) => `
         <div class="rank-item">
           <div class="rank-no">${index + 1}</div>
           <div>
-            <strong>${escapeHtml(row.truncateLabel === false ? row.label : short(row.label, 34))}</strong>
+            ${row.collapsibleLabel
+              ? renderCollapsibleText(row.label, row.secondaryLabel || "", row.previewLength || 30)
+              : `<strong>${escapeHtml(row.truncateLabel === false ? row.label : short(row.label, 34))}</strong>`}
             <div class="mini">${escapeHtml(row.sub)}</div>
           </div>
           <div class="pill">${formatter(row.metric)}</div>
@@ -2104,16 +2135,7 @@
     }
 
     function renderProductCell(primary, secondary = "") {
-      const main = String(primary || secondary || "").trim();
-      const extra = String(secondary || "").trim();
-      if (!main) return '<span class="mini">无产品名</span>';
-      const hasExtra = extra && normalizeText(extra) !== normalizeText(main);
-      const fullText = hasExtra ? `${escapeHtml(main)}<br><span class="mini">${escapeHtml(extra)}</span>` : escapeHtml(main);
-      return `
-        <div class="cell-details">
-          <div class="full-text">${fullText}</div>
-        </div>
-      `;
+      return renderCollapsibleText(primary, secondary, 24);
     }
 
     function renderRefundFlags(row) {
@@ -2154,7 +2176,7 @@
           <div class="detail-list">
             ${products.map((item) => `
               <div class="detail-row">
-                <strong>${escapeHtml(item.product_name_cn || item.product_name_raw || item.product_id || "未识别产品")}</strong>
+                ${renderCollapsibleText(item.product_name_cn || item.product_name_raw || item.product_id || "未识别产品", item.product_name_raw, 24)}
               <div class="sub-metric">PID ${escapeHtml(item.product_id || "无")} / 达人 ${formatInt(item.creator_count)} / 视频 ${formatInt(item.video_count)}</div>
               <div class="sub-metric">VV ${formatInt(item.vv)} / GMV ${formatRp(item.txn_gmv)} / Orders ${formatInt(item.txn_orders)}</div>
               ${(item.level_breakdown && item.level_breakdown.length) ? `
@@ -2176,6 +2198,9 @@
     }
 
     function renderFilterOptions(rows) {
+      const selectedBrands = getSelectedValues(refs.brandFilter);
+      const selectedLevels = getSelectedValues(refs.levelFilter);
+      const selectedPeriods = getSelectedValues(refs.periodFilter);
       const brands = [...new Set([...BRANDS.map((brand) => brand.toUpperCase()), ...rows.map((row) => row.brand).filter(Boolean)])].sort();
       const levels = (state.currentView === "lifecycle" || state.currentView === "refund")
         ? [...new Set(
@@ -2191,9 +2216,9 @@
       const periods = (state.currentView === "refund")
         ? [...new Set(state.merged.transactionRows.map((row) => row.product_period).filter(Boolean))].sort()
         : [...new Set(rows.map((row) => row.product_period).filter(Boolean))].sort();
-      refs.brandFilter.innerHTML = `<option value="">全部品牌</option>${brands.map((brand) => `<option value="${brand}">${brand}</option>`).join("")}`;
-      refs.levelFilter.innerHTML = `<option value="">全部达人等级</option>${levels.map((level) => `<option value="${level}">${level}</option>`).join("")}`;
-      refs.periodFilter.innerHTML = `<option value="">全部产品阶段</option>${periods.map((period) => `<option value="${period}">${period}</option>`).join("")}`;
+      refs.brandFilter.innerHTML = brands.map((brand) => `<option value="${brand}" ${selectedBrands.includes(brand) ? "selected" : ""}>${brand}</option>`).join("");
+      refs.levelFilter.innerHTML = levels.map((level) => `<option value="${level}" ${selectedLevels.includes(level) ? "selected" : ""}>${level}</option>`).join("");
+      refs.periodFilter.innerHTML = periods.map((period) => `<option value="${period}" ${selectedPeriods.includes(period) ? "selected" : ""}>${period}</option>`).join("");
       enableControls();
     }
 
@@ -2373,9 +2398,9 @@
           row.video_id
         ];
         const keywordHit = !filters.keyword || keywordFields.some((field) => normalizeText(field).includes(filters.keyword));
-        const brandHit = !filters.brand || row.brand === filters.brand;
-        const levelHit = !filters.level || row.creator_level === filters.level;
-        const periodHit = !filters.period || row.product_period === filters.period;
+        const brandHit = !filters.brands.length || filters.brands.includes(row.brand);
+        const levelHit = !filters.levels.length || filters.levels.includes(row.creator_level);
+        const periodHit = !filters.periods.length || filters.periods.includes(row.product_period);
         const dateField = state.currentView === "linkage" ? (row.txn_date_value || row.date_value) : row.date_value;
         const startHit = !filters.startDate || (dateField && dateField >= filters.startDate);
         const endHit = !filters.endDate || (dateField && dateField <= filters.endDate);
@@ -2472,9 +2497,9 @@
     refs.endDateFilter.addEventListener("change", applyFilters);
     refs.resetBtn.addEventListener("click", () => {
       refs.searchInput.value = "";
-      refs.brandFilter.value = "";
-      refs.levelFilter.value = "";
-      refs.periodFilter.value = "";
+      clearMultiSelect(refs.brandFilter);
+      clearMultiSelect(refs.levelFilter);
+      clearMultiSelect(refs.periodFilter);
       refs.startDateFilter.value = "";
       refs.endDateFilter.value = "";
       applyFilters();
