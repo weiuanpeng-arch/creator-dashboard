@@ -1,22 +1,7 @@
-const data = window.__CREATOR_POOL__;
 const STORAGE_KEY = "creator_dashboard_overrides_v1";
-
-const tagOptions = {
-  contentPrimary: getOptions("内容一级标签"),
-  contentSecondary: getOptions("内容二级标签"),
-  contentFormat: getOptions("内容形式标签"),
-  persona: getOptions("人设/风格标签"),
-  audience: getOptions("受众标签"),
-  productPrimary: getOptions("带货一级类目"),
-  productSecondary: getOptions("带货二级类目"),
-  conversion: getOptions("转化形式"),
-  tier: getOptions("合作分层"),
-  brand: data.brands.map((brand) => brand["品牌"]),
-  progress: ["待处理", "已初筛", "已完成"],
-};
-
-const creators = data.creators.map((creator) => normalizeCreator({ ...creator }));
-applyStoredOverrides(creators);
+let data;
+let tagOptions;
+let creators = [];
 
 const state = {
   search: "",
@@ -64,6 +49,31 @@ const elements = {
 
 function getOptions(dimension) {
   return unique(data.tags.filter((tag) => tag["标签维度"] === dimension).map((tag) => tag["标签名称"]));
+}
+
+async function loadData() {
+  const response = await fetch(`./data/creator_pool.json?ts=${Date.now()}`, { cache: "no-store" });
+  if (!response.ok) {
+    throw new Error(`Failed to load creator data: ${response.status}`);
+  }
+
+  data = await response.json();
+  tagOptions = {
+    contentPrimary: getOptions("内容一级标签"),
+    contentSecondary: getOptions("内容二级标签"),
+    contentFormat: getOptions("内容形式标签"),
+    persona: getOptions("人设/风格标签"),
+    audience: getOptions("受众标签"),
+    productPrimary: getOptions("带货一级类目"),
+    productSecondary: getOptions("带货二级类目"),
+    conversion: getOptions("转化形式"),
+    tier: getOptions("合作分层"),
+    brand: data.brands.map((brand) => brand["品牌"]),
+    progress: ["待处理", "已初筛", "已完成"],
+  };
+
+  creators = data.creators.map((creator) => normalizeCreator({ ...creator }));
+  applyStoredOverrides(creators);
 }
 
 function unique(items) {
@@ -553,7 +563,23 @@ function render() {
   renderCreatorRows(filteredCreators);
 }
 
-function init() {
+async function init() {
+  try {
+    await loadData();
+  } catch (error) {
+    elements.generatedAt.textContent = "数据加载失败";
+    elements.saveStatus.textContent = "请刷新页面重试";
+    elements.creatorTableBody.innerHTML = `
+      <tr>
+        <td colspan="7">
+          <div class="empty-state">达人数据加载失败，请稍后刷新页面。</div>
+        </td>
+      </tr>
+    `;
+    console.error(error);
+    return;
+  }
+
   elements.generatedAt.textContent = `数据生成时间 ${data.generatedAt}`;
   elements.coopRangeValue.textContent = `${state.minCoop} 次`;
   setSaveStatus("网页内修改会自动保存在当前浏览器");
