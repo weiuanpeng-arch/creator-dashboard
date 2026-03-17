@@ -1,0 +1,165 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>印尼项目达人标签 Dashboard</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <div class="shell">
+      <header class="hero">
+        <div class="hero__copy">
+          <p class="eyebrow">Indonesia Creator Matching</p>
+          <h1>四品牌达人标签 Dashboard</h1>
+          <p class="hero__text">
+            把合作 3 次以上的达人放到同一个筛选面板里，按品牌、内容方向、带货品类和合作状态快速找人。
+          </p>
+          <div class="hero__meta">
+            <span id="generated-at">数据加载中...</span>
+            <span class="dot"></span>
+            <span>本地静态网页，可继续扩展成线上版本</span>
+          </div>
+        </div>
+        <div class="hero__actions">
+          <button class="ghost-button" id="reset-filters" type="button">重置筛选</button>
+          <button class="ghost-button" id="export-filtered" type="button">导出当前筛选</button>
+          <button class="ghost-button" id="export-all" type="button">导出全部打标</button>
+          <a class="solid-button" href="./data/creator_pool.csv" download>下载当前达人数据</a>
+        </div>
+      </header>
+
+      <main class="layout">
+        <aside class="filters">
+          <section class="panel">
+            <div class="panel__header">
+              <p class="panel__eyebrow">Filters</p>
+              <h2>达人筛选</h2>
+            </div>
+
+            <label class="field">
+              <span>搜索达人</span>
+              <input id="search-input" type="search" placeholder="kolId / 昵称 / 备注" />
+            </label>
+
+            <div class="grid-two">
+              <label class="field">
+                <span>适配品牌</span>
+                <select id="brand-filter"></select>
+              </label>
+              <label class="field">
+                <span>平台</span>
+                <select id="platform-filter"></select>
+              </label>
+            </div>
+
+            <div class="grid-two">
+              <label class="field">
+                <span>内容一级标签</span>
+                <select id="content-filter"></select>
+              </label>
+              <label class="field">
+                <span>带货一级类目</span>
+                <select id="product-filter"></select>
+              </label>
+            </div>
+
+            <div class="grid-two">
+              <label class="field">
+                <span>转化形式</span>
+                <select id="conversion-filter"></select>
+              </label>
+              <label class="field">
+                <span>打标状态</span>
+                <select id="progress-filter"></select>
+              </label>
+            </div>
+
+            <label class="field">
+              <span>合作次数至少</span>
+              <input id="coop-range" type="range" min="3" max="17" value="3" />
+              <strong id="coop-range-value">3 次</strong>
+            </label>
+          </section>
+
+          <section class="panel">
+            <div class="panel__header">
+              <p class="panel__eyebrow">Overview</p>
+              <h2>品牌方向</h2>
+            </div>
+            <div id="brand-grid" class="brand-grid"></div>
+          </section>
+        </aside>
+
+        <section class="content">
+          <section class="stats" id="stats-grid"></section>
+
+          <section class="panel tabs-panel">
+            <div class="tabs">
+              <button class="tab is-active" data-tab="creators" type="button">达人池</button>
+              <button class="tab" data-tab="tags" type="button">标签字典</button>
+            </div>
+
+            <div class="tab-panel is-active" data-panel="creators">
+              <div class="list-toolbar">
+                <div>
+                  <p class="panel__eyebrow">Creator Pool</p>
+                  <h2 id="result-title">189 个达人</h2>
+                </div>
+                <div class="toolbar-side">
+                  <p id="result-subtitle" class="subtle">按合作次数、品牌和内容维度交叉筛选</p>
+                  <p id="save-status" class="subtle">网页内修改会自动保存在当前浏览器</p>
+                </div>
+              </div>
+              <div id="active-filters" class="active-filters"></div>
+              <div class="table-wrap">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>达人</th>
+                      <th>合作次数</th>
+                      <th>平台</th>
+                      <th>最近状态</th>
+                      <th>适配品牌</th>
+                      <th>内容标签</th>
+                      <th>带货类目</th>
+                    </tr>
+                  </thead>
+                  <tbody id="creator-table-body"></tbody>
+                </table>
+              </div>
+            </div>
+
+            <div class="tab-panel" data-panel="tags">
+              <div class="list-toolbar">
+                <div>
+                  <p class="panel__eyebrow">Tag Dictionary</p>
+                  <h2>统一打标口径</h2>
+                </div>
+                <p class="subtle">先看标签定义，再给达人打标</p>
+              </div>
+              <div class="tag-cards" id="tag-cards"></div>
+            </div>
+          </section>
+        </section>
+      </main>
+    </div>
+
+    <dialog id="detail-modal" class="detail-modal">
+      <div class="detail-modal__content">
+        <div class="detail-modal__header">
+          <div>
+            <p class="panel__eyebrow">Creator Detail</p>
+            <h2 id="detail-title"></h2>
+            <p id="detail-subtitle" class="subtle"></p>
+          </div>
+          <button class="ghost-button" id="close-modal" type="button">关闭</button>
+        </div>
+        <div id="detail-body" class="detail-grid"></div>
+      </div>
+    </dialog>
+
+    <script src="./data/creator_pool.js"></script>
+    <script src="./app.js" type="module"></script>
+  </body>
+</html>
