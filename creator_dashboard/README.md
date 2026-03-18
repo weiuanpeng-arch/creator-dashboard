@@ -69,7 +69,7 @@ python3 /Users/apple/Documents/Playground/creator_dashboard/build_data.py
 4. 打开网页，在“标签维护 -> 云端同步设置”里填写：
 
 - `Supabase URL`
-- `Anon Key`
+- `Publishable Key` 或 `Anon Key`
 - `Workspace ID`
 - `编辑人`
 - `写入口令`
