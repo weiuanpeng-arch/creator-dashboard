@@ -740,12 +740,13 @@ function renderStats(filteredCreators) {
   const avgCoop = filteredCreators.length
     ? (filteredCreators.reduce((sum, creator) => sum + creator["合作次数"], 0) / filteredCreators.length).toFixed(1)
     : "0.0";
+  const tagged = filteredCreators.filter((creator) => ["已初筛", "已完成"].includes(creator["是否已打标"])).length;
   const completed = filteredCreators.filter((creator) => creator["是否已打标"] === "已完成").length;
   const inProgress = filteredCreators.filter((creator) => creator["是否已打标"] === "已初筛").length;
 
   const cards = [
     { label: "当前达人", value: filteredCreators.length, note: `总池子 ${creators.length}` },
-    { label: "已完成打标", value: completed, note: `初筛中 ${inProgress}` },
+    { label: "已打标签", value: tagged, note: `已完成 ${completed} · 初筛 ${inProgress}` },
     { label: "覆盖品牌", value: matchedBrands.size || data.stats.brandCount, note: "四大品牌匹配" },
     { label: "平均合作次数", value: avgCoop, note: "合作>=3 次达人池" },
   ];
