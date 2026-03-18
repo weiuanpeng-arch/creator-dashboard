@@ -55,7 +55,7 @@ create or replace function public.verify_creator_workspace_passcode(
 returns void
 language plpgsql
 security definer
-set search_path = public
+set search_path = public, extensions
 as $$
 declare
   stored_hash text;
@@ -69,7 +69,7 @@ begin
     raise exception 'Workspace not found: %', p_workspace_id;
   end if;
 
-  if crypt(coalesce(p_passcode, ''), stored_hash) <> stored_hash then
+  if extensions.crypt(coalesce(p_passcode, ''), stored_hash) <> stored_hash then
     raise exception 'Invalid write passcode';
   end if;
 end;
@@ -222,4 +222,4 @@ comment on table public.creator_sync_tags is 'Shared custom tags by workspace';
 
 -- 首次初始化时，请把下面这行里的 workspace_id、workspace_name 和写入口令替换成你自己的值后再执行一次。
 -- insert into public.creator_sync_workspaces (workspace_id, workspace_name, write_passcode_hash)
--- values ('creator-dashboard-prod', 'Creator Dashboard Prod', crypt('replace-with-your-passcode', gen_salt('bf')));
+-- values ('creator-dashboard-prod', 'Creator Dashboard Prod', extensions.crypt('replace-with-your-passcode', extensions.gen_salt('bf')));
