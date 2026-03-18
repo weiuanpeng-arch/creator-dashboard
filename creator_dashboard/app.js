@@ -40,6 +40,12 @@ const DEFAULT_SYNC_SETTINGS = {
   writePasscode: "",
 };
 
+const PUBLIC_READ_SYNC_SETTINGS = {
+  supabaseUrl: "https://sbznfjnsirajqkkcwayj.supabase.co",
+  anonKey: "sb_publishable_tM67K7Mi1qDUkemhgzDuGg_dsdwitBT",
+  workspaceId: "creator-dashboard-prod",
+};
+
 let baseData;
 let data;
 let tagOptions;
@@ -186,16 +192,20 @@ function populateSelect(select, options) {
 
 function normalizeSyncSettings(raw = {}) {
   return {
-    supabaseUrl: String(raw.supabaseUrl || "").trim().replace(/\/+$/, ""),
-    anonKey: String(raw.anonKey || "").trim(),
-    workspaceId: String(raw.workspaceId || "").trim(),
+    supabaseUrl: String(raw.supabaseUrl || PUBLIC_READ_SYNC_SETTINGS.supabaseUrl || "").trim().replace(/\/+$/, ""),
+    anonKey: String(raw.anonKey || PUBLIC_READ_SYNC_SETTINGS.anonKey || "").trim(),
+    workspaceId: String(raw.workspaceId || PUBLIC_READ_SYNC_SETTINGS.workspaceId || "").trim(),
     editorName: String(raw.editorName || "").trim(),
     writePasscode: String(raw.writePasscode || "").trim(),
   };
 }
 
-function hasSyncConfig(settings = syncSettings) {
-  return Boolean(settings.supabaseUrl && settings.anonKey && settings.workspaceId && settings.editorName && settings.writePasscode);
+function hasReadSyncConfig(settings = syncSettings) {
+  return Boolean(settings.supabaseUrl && settings.anonKey && settings.workspaceId);
+}
+
+function hasWriteSyncConfig(settings = syncSettings) {
+  return Boolean(hasReadSyncConfig(settings) && settings.editorName && settings.writePasscode);
 }
 
 function loadOverrides() {
@@ -430,11 +440,15 @@ async function rebuildWorkingSet() {
   remoteCustomTags = [];
   syncConnected = false;
 
-  if (hasSyncConfig(syncSettings)) {
+  if (hasReadSyncConfig(syncSettings)) {
     try {
       await loadRemoteState();
       syncConnected = true;
-      setSyncStatus(`已连接工作区 ${syncSettings.workspaceId}，当前修改会同步到共享库。`);
+      if (hasWriteSyncConfig(syncSettings)) {
+        setSyncStatus(`已连接工作区 ${syncSettings.workspaceId}，当前修改会同步到共享库。`);
+      } else {
+        setSyncStatus(`已连接工作区 ${syncSettings.workspaceId}，当前为共享只读模式。填写编辑人和口令后可直接写入。`);
+      }
     } catch (error) {
       syncConnected = false;
       setSyncStatus(`云端连接失败，当前回退为本地模式：${error.message}`);
@@ -473,12 +487,16 @@ function setSyncStatus(text) {
 
 function updateModeCopy() {
   if (syncConnected) {
-    setSaveStatus(`云端同步已连接：${syncSettings.workspaceId} · 修改会实时写入共享库`);
+    if (hasWriteSyncConfig(syncSettings)) {
+      setSaveStatus(`云端同步已连接：${syncSettings.workspaceId} · 修改会实时写入共享库`);
+    } else {
+      setSaveStatus(`已连接共享库：${syncSettings.workspaceId} · 当前默认展示最新云端标签，填写编辑信息后可直接保存`);
+    }
     elements.customTagScope.textContent = `当前展示工作区 ${syncSettings.workspaceId} 的共享自定义标签。`;
     return;
   }
 
-  if (hasSyncConfig(syncSettings)) {
+  if (hasReadSyncConfig(syncSettings)) {
     setSaveStatus("云端暂时不可用，当前修改会先缓存在本地浏览器");
     elements.customTagScope.textContent = "云端当前未连通，下面展示的是当前浏览器里的本地缓存。";
     return;
@@ -598,7 +616,7 @@ async function saveSyncSettingsFromForm(formData) {
   persistSyncSettings(nextSettings);
   syncSettings = nextSettings;
 
-  if (!hasSyncConfig(nextSettings)) {
+  if (!hasReadSyncConfig(nextSettings)) {
     syncConnected = false;
     updateSyncUi();
     updateModeCopy();
@@ -610,12 +628,16 @@ async function saveSyncSettingsFromForm(formData) {
   updateSyncUi();
   updateModeCopy();
   if (syncConnected) {
-    setSyncStatus(`已连接工作区 ${syncSettings.workspaceId}，后续保存会多人同步。`);
+    if (hasWriteSyncConfig(syncSettings)) {
+      setSyncStatus(`已连接工作区 ${syncSettings.workspaceId}，后续保存会多人同步。`);
+    } else {
+      setSyncStatus(`已连接工作区 ${syncSettings.workspaceId}，当前为共享只读模式。`);
+    }
   }
 }
 
 async function migrateLocalCacheToCloud() {
-  if (!hasSyncConfig(syncSettings)) {
+  if (!hasWriteSyncConfig(syncSettings)) {
     setSyncStatus("请先填写完整的云端配置，再执行迁移。");
     return;
   }
@@ -663,7 +685,7 @@ function setupSyncSettings() {
   });
 
   elements.syncRefresh.addEventListener("click", async () => {
-    if (!hasSyncConfig(syncSettings)) {
+    if (!hasReadSyncConfig(syncSettings)) {
       setSyncStatus("请先填写完整的云端配置。");
       return;
     }
@@ -850,7 +872,7 @@ async function addCustomTag(formData) {
     "定义/什么时候打这个标签": definition,
   };
 
-  if (hasSyncConfig(syncSettings)) {
+  if (hasWriteSyncConfig(syncSettings)) {
     try {
       await remoteUpsertCustomTag(tagPayload);
       await refreshAfterMutation();
@@ -875,7 +897,7 @@ async function addCustomTag(formData) {
 }
 
 async function deleteCustomTag(tagId) {
-  if (hasSyncConfig(syncSettings) && syncConnected) {
+  if (hasWriteSyncConfig(syncSettings) && syncConnected) {
     try {
       await remoteDeleteCustomTag(tagId);
       await refreshAfterMutation();
@@ -1080,7 +1102,7 @@ async function saveCreatorFromForm(formData) {
   const nextValues = buildFormValues(formData);
   const changedFields = buildChangedFields(creator["kolId"], nextValues);
 
-  if (hasSyncConfig(syncSettings)) {
+  if (hasWriteSyncConfig(syncSettings)) {
     try {
       await remoteUpsertCreatorOverride(creator["kolId"], changedFields);
       await refreshAfterMutation();
