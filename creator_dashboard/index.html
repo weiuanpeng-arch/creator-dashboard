@@ -18,7 +18,7 @@
           <div class="hero__meta">
             <span id="generated-at">数据加载中...</span>
             <span class="dot"></span>
-            <span>本地静态网页，可继续扩展成线上版本</span>
+            <span>支持本地维护达人标签和自定义标签字典</span>
           </div>
         </div>
         <div class="hero__actions">
@@ -98,6 +98,7 @@
             <div class="tabs">
               <button class="tab is-active" data-tab="creators" type="button">达人池</button>
               <button class="tab" data-tab="tags" type="button">标签字典</button>
+              <button class="tab" data-tab="manage" type="button">标签维护</button>
             </div>
 
             <div class="tab-panel is-active" data-panel="creators">
@@ -123,6 +124,7 @@
                       <th>适配品牌</th>
                       <th>内容标签</th>
                       <th>带货类目</th>
+                      <th>操作</th>
                     </tr>
                   </thead>
                   <tbody id="creator-table-body"></tbody>
@@ -139,6 +141,55 @@
                 <p class="subtle">先看标签定义，再给达人打标</p>
               </div>
               <div class="tag-cards" id="tag-cards"></div>
+            </div>
+
+            <div class="tab-panel" data-panel="manage">
+              <div class="list-toolbar">
+                <div>
+                  <p class="panel__eyebrow">Tag Maintenance</p>
+                  <h2>维护自定义标签</h2>
+                </div>
+                <p class="subtle">新增后的标签会立即出现在筛选器和达人编辑表单里，保存在当前浏览器。</p>
+              </div>
+
+              <section class="manage-layout">
+                <article class="manage-card">
+                  <h3>新增标签</h3>
+                  <form id="custom-tag-form" class="editor-grid">
+                    <label class="field">
+                      <span>标签维度</span>
+                      <select id="custom-tag-dimension" name="标签维度"></select>
+                    </label>
+                    <label class="field">
+                      <span>标签名称</span>
+                      <input id="custom-tag-name" name="标签名称" type="text" placeholder="比如：服饰穿搭" />
+                    </label>
+                    <label class="field">
+                      <span>适配品牌</span>
+                      <input id="custom-tag-brands" name="适配品牌" type="text" placeholder="多个可用 / 分隔" />
+                    </label>
+                    <label class="field">
+                      <span>定义说明</span>
+                      <input id="custom-tag-definition" name="定义" type="text" placeholder="说明什么时候用这个标签" />
+                    </label>
+                    <div class="editor-actions is-wide">
+                      <p id="custom-tag-status" class="editor-meta">建议先新增常用标签，再回到达人池维护具体达人。</p>
+                      <button class="solid-button" type="submit">新增自定义标签</button>
+                    </div>
+                  </form>
+                </article>
+
+                <article class="manage-card">
+                  <div class="manage-card__header">
+                    <div>
+                      <h3>当前自定义标签</h3>
+                      <p class="subtle">只展示你当前浏览器里新增的标签。</p>
+                    </div>
+                  </div>
+                  <div id="custom-tag-empty" class="empty-state">还没有新增自定义标签。</div>
+                  <div id="custom-tag-list" class="custom-tag-list"></div>
+                </article>
+              </section>
             </div>
           </section>
         </section>

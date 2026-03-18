@@ -315,7 +315,7 @@ body::before {
 table {
   width: 100%;
   border-collapse: collapse;
-  min-width: 880px;
+  min-width: 980px;
 }
 
 th,
@@ -345,6 +345,13 @@ tbody tr {
 
 tbody tr:hover {
   background: rgba(202, 90, 52, 0.07);
+}
+
+.table-action {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 88px;
 }
 
 .creator-name {
@@ -407,6 +414,75 @@ tbody tr:hover {
   color: var(--muted);
   line-height: 1.6;
   font-size: 14px;
+}
+
+.tag-card__meta {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: center;
+}
+
+.manage-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.2fr);
+  gap: 14px;
+}
+
+.manage-card {
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  padding: 18px;
+  background: rgba(255, 255, 255, 0.68);
+}
+
+.manage-card h3 {
+  margin: 0 0 8px;
+}
+
+.manage-card__header {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  align-items: flex-start;
+  margin-bottom: 12px;
+}
+
+.custom-tag-list {
+  display: grid;
+  gap: 12px;
+}
+
+.custom-tag-item {
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  padding: 14px;
+  background: rgba(255, 250, 244, 0.9);
+}
+
+.custom-tag-item h4 {
+  margin: 0;
+  font-size: 15px;
+}
+
+.custom-tag-item p {
+  margin: 8px 0 0;
+  color: var(--muted);
+  font-size: 14px;
+  line-height: 1.55;
+}
+
+.custom-tag-item__top {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: flex-start;
+}
+
+.custom-tag-item__actions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
 }
 
 .detail-modal {
@@ -516,6 +592,12 @@ tbody tr:hover {
   color: var(--muted);
 }
 
+.field-hint {
+  margin-top: 6px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
 .empty-state {
   padding: 36px 18px;
   text-align: center;
@@ -553,6 +635,7 @@ tbody tr:hover {
   .grid-two,
   .editor-grid,
   .tag-cards,
+  .manage-layout,
   .detail-grid,
   .stats {
     grid-template-columns: 1fr;

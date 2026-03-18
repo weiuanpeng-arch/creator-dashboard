@@ -1,7 +1,39 @@
 const STORAGE_KEY = "creator_dashboard_overrides_v1";
+const CUSTOM_TAG_STORAGE_KEY = "creator_dashboard_custom_tags_v1";
+const EDITABLE_FIELDS = [
+  "主页链接",
+  "达人昵称",
+  "内容一级标签",
+  "内容二级标签",
+  "内容形式标签",
+  "人设/风格标签",
+  "受众标签",
+  "带货一级类目",
+  "带货二级类目",
+  "适配品牌",
+  "转化形式",
+  "合作分层",
+  "是否已打标",
+  "打标依据链接",
+  "备注",
+];
+const TAG_DIMENSION_CONFIG = {
+  内容一级标签: "内容标签",
+  内容二级标签: "内容标签",
+  内容形式标签: "内容标签",
+  "人设/风格标签": "内容标签",
+  受众标签: "内容标签",
+  带货一级类目: "产品标签",
+  带货二级类目: "产品标签",
+  转化形式: "筛选标签",
+  合作分层: "筛选标签",
+};
+
+let baseData;
 let data;
 let tagOptions;
 let creators = [];
+let sourceCreatorsById = {};
 
 const state = {
   search: "",
@@ -45,6 +77,14 @@ const elements = {
   detailSubtitle: document.querySelector("#detail-subtitle"),
   detailBody: document.querySelector("#detail-body"),
   closeModal: document.querySelector("#close-modal"),
+  customTagForm: document.querySelector("#custom-tag-form"),
+  customTagDimension: document.querySelector("#custom-tag-dimension"),
+  customTagName: document.querySelector("#custom-tag-name"),
+  customTagBrands: document.querySelector("#custom-tag-brands"),
+  customTagDefinition: document.querySelector("#custom-tag-definition"),
+  customTagStatus: document.querySelector("#custom-tag-status"),
+  customTagList: document.querySelector("#custom-tag-list"),
+  customTagEmpty: document.querySelector("#custom-tag-empty"),
 };
 
 function getOptions(dimension) {
@@ -57,7 +97,18 @@ async function loadData() {
     throw new Error(`Failed to load creator data: ${response.status}`);
   }
 
-  data = await response.json();
+  baseData = await response.json();
+  sourceCreatorsById = Object.fromEntries(baseData.creators.map((creator) => [creator["kolId"], { ...creator }]));
+  refreshDataState();
+  creators = data.creators.map((creator) => normalizeCreator({ ...creator }));
+  applyStoredOverrides(creators);
+}
+
+function refreshDataState() {
+  data = {
+    ...baseData,
+    tags: [...baseData.tags, ...loadCustomTags()],
+  };
   tagOptions = {
     contentPrimary: getOptions("内容一级标签"),
     contentSecondary: getOptions("内容二级标签"),
@@ -71,9 +122,6 @@ async function loadData() {
     brand: data.brands.map((brand) => brand["品牌"]),
     progress: ["待处理", "已初筛", "已完成"],
   };
-
-  creators = data.creators.map((creator) => normalizeCreator({ ...creator }));
-  applyStoredOverrides(creators);
 }
 
 function unique(items) {
@@ -126,29 +174,30 @@ function loadOverrides() {
   }
 }
 
+function loadCustomTags() {
+  try {
+    const saved = JSON.parse(localStorage.getItem(CUSTOM_TAG_STORAGE_KEY) || "[]");
+    return Array.isArray(saved) ? saved : [];
+  } catch {
+    return [];
+  }
+}
+
+function persistCustomTags(tags) {
+  localStorage.setItem(CUSTOM_TAG_STORAGE_KEY, JSON.stringify(tags));
+}
+
 function persistOverrides() {
   const overrides = {};
   creators.forEach((creator) => {
-    const changedFields = [
-      "主页链接",
-      "达人昵称",
-      "内容一级标签",
-      "内容二级标签",
-      "内容形式标签",
-      "人设/风格标签",
-      "受众标签",
-      "带货一级类目",
-      "带货二级类目",
-      "适配品牌",
-      "转化形式",
-      "合作分层",
-      "是否已打标",
-      "打标依据链接",
-      "备注",
-    ];
     const changed = {};
-    changedFields.forEach((field) => {
-      if (creator[field]) changed[field] = creator[field];
+    const source = sourceCreatorsById[creator["kolId"]] || {};
+    EDITABLE_FIELDS.forEach((field) => {
+      const currentValue = String(creator[field] ?? "");
+      const sourceValue = String(source[field] ?? "");
+      if (currentValue !== sourceValue) {
+        changed[field] = currentValue;
+      }
     });
     if (Object.keys(changed).length) overrides[creator["kolId"]] = changed;
   });
@@ -169,13 +218,34 @@ function setSaveStatus(text) {
   elements.saveStatus.textContent = text;
 }
 
-function setupFilters() {
+function populateFilterControls() {
   populateSelect(elements.brandFilter, unique(tagOptions.brand));
   populateSelect(elements.platformFilter, unique(creators.map((creator) => creator["平台"])));
   populateSelect(elements.contentFilter, tagOptions.contentPrimary);
   populateSelect(elements.productFilter, tagOptions.productPrimary);
   populateSelect(elements.conversionFilter, tagOptions.conversion);
   populateSelect(elements.progressFilter, tagOptions.progress);
+
+  elements.brandFilter.value = state.brand;
+  elements.platformFilter.value = state.platform;
+  elements.contentFilter.value = state.content;
+  elements.productFilter.value = state.product;
+  elements.conversionFilter.value = state.conversion;
+  elements.progressFilter.value = state.progress;
+}
+
+function populateCustomTagDimensionOptions() {
+  elements.customTagDimension.innerHTML = "";
+  Object.keys(TAG_DIMENSION_CONFIG).forEach((dimension) => {
+    const node = document.createElement("option");
+    node.value = dimension;
+    node.textContent = dimension;
+    elements.customTagDimension.appendChild(node);
+  });
+}
+
+function setupFilters() {
+  populateFilterControls();
 
   elements.searchInput.addEventListener("input", (event) => {
     state.search = event.target.value.trim().toLowerCase();
@@ -226,6 +296,10 @@ function setupFilters() {
   });
 }
 
+function setCustomTagStatus(text) {
+  elements.customTagStatus.textContent = text;
+}
+
 function setupTabs() {
   elements.tabs.forEach((tab) => {
     tab.addEventListener("click", () => {
@@ -243,6 +317,15 @@ function setupExport() {
   });
   elements.exportAll.addEventListener("click", () => {
     downloadCsv(creators, `creator-all-${dateStamp()}.csv`);
+  });
+}
+
+function setupCustomTagManager() {
+  populateCustomTagDimensionOptions();
+  renderCustomTagList();
+  elements.customTagForm.addEventListener("submit", (event) => {
+    event.preventDefault();
+    addCustomTag(new FormData(elements.customTagForm));
   });
 }
 
@@ -292,17 +375,110 @@ function renderTagCards() {
     .map(
       (tag) => `
         <article class="tag-card">
-          <div class="pill-group">
-            <span class="pill">${tag["标签大类"]}</span>
-            <span class="pill is-muted">${tag["标签维度"]}</span>
+          <div class="tag-card__meta">
+            <div class="pill-group">
+              <span class="pill">${escapeHtml(tag["标签大类"] || "")}</span>
+              <span class="pill is-muted">${escapeHtml(tag["标签维度"] || "")}</span>
+            </div>
+            ${tag.__custom ? '<span class="pill is-warm">自定义</span>' : ""}
           </div>
-          <h3>${tag["标签名称"]}</h3>
-          <p><strong>适配品牌：</strong>${tag["适配品牌"]}</p>
-          <p>${tag["定义/什么时候打这个标签"]}</p>
+          <h3>${escapeHtml(tag["标签名称"] || "")}</h3>
+          <p><strong>适配品牌：</strong>${escapeHtml(tag["适配品牌"] || "")}</p>
+          <p>${escapeHtml(tag["定义/什么时候打这个标签"] || "")}</p>
         </article>
       `,
     )
     .join("");
+}
+
+function renderCustomTagList() {
+  const customTags = loadCustomTags();
+  elements.customTagEmpty.style.display = customTags.length ? "none" : "block";
+  elements.customTagList.innerHTML = customTags
+    .map(
+      (tag) => `
+        <article class="custom-tag-item">
+          <div class="custom-tag-item__top">
+            <div>
+              <div class="pill-group">
+                <span class="pill">${tag["标签维度"]}</span>
+                <span class="pill is-warm">自定义</span>
+              </div>
+              <h4>${escapeHtml(tag["标签名称"])}</h4>
+            </div>
+            <div class="custom-tag-item__actions">
+              <button class="ghost-button table-action" type="button" data-delete-custom-tag="${tag.id}">删除</button>
+            </div>
+          </div>
+          <p><strong>适配品牌：</strong>${escapeHtml(tag["适配品牌"] || "未填写")}</p>
+          <p>${escapeHtml(tag["定义/什么时候打这个标签"] || "未填写定义")}</p>
+        </article>
+      `,
+    )
+    .join("");
+
+  elements.customTagList.querySelectorAll("[data-delete-custom-tag]").forEach((button) => {
+    button.addEventListener("click", () => {
+      deleteCustomTag(button.dataset.deleteCustomTag);
+    });
+  });
+}
+
+function addCustomTag(formData) {
+  const dimension = String(formData.get("标签维度") || "").trim();
+  const tagName = String(formData.get("标签名称") || "").trim();
+  const brands = String(formData.get("适配品牌") || "").trim();
+  const definition = String(formData.get("定义") || "").trim();
+
+  if (!dimension || !tagName) {
+    setCustomTagStatus("请先填写标签维度和标签名称。");
+    return;
+  }
+
+  const duplicated = data.tags.some((tag) => tag["标签维度"] === dimension && tag["标签名称"] === tagName);
+  if (duplicated) {
+    setCustomTagStatus("这个标签已经存在了，可以直接回达人池使用。");
+    return;
+  }
+
+  const customTags = loadCustomTags();
+  customTags.push({
+    id: `${dimension}-${tagName}-${Date.now()}`,
+    __custom: true,
+    标签大类: TAG_DIMENSION_CONFIG[dimension],
+    标签维度: dimension,
+    标签名称: tagName,
+    适配品牌: brands,
+    "定义/什么时候打这个标签": definition,
+  });
+  persistCustomTags(customTags);
+  refreshDataState();
+  populateFilterControls();
+  renderTagCards();
+  renderCustomTagList();
+  render();
+  if (elements.detailModal.open && state.activeCreatorId) {
+    const creator = creators.find((item) => item["kolId"] === state.activeCreatorId);
+    if (creator) openDetail(creator);
+  }
+  elements.customTagForm.reset();
+  populateCustomTagDimensionOptions();
+  setCustomTagStatus(`已新增自定义标签：${tagName}`);
+}
+
+function deleteCustomTag(tagId) {
+  const nextTags = loadCustomTags().filter((tag) => tag.id !== tagId);
+  persistCustomTags(nextTags);
+  refreshDataState();
+  populateFilterControls();
+  renderTagCards();
+  renderCustomTagList();
+  render();
+  if (elements.detailModal.open && state.activeCreatorId) {
+    const creator = creators.find((item) => item["kolId"] === state.activeCreatorId);
+    if (creator) openDetail(creator);
+  }
+  setCustomTagStatus("已删除自定义标签。");
 }
 
 function matchesCreator(creator) {
@@ -342,13 +518,18 @@ function renderActiveFilters() {
 
 function renderCreatorRows(filteredCreators) {
   elements.resultTitle.textContent = `${filteredCreators.length} 个达人`;
-  elements.resultSubtitle.textContent = `合作门槛 ${state.minCoop} 次，当前以 ${state.activeTab === "creators" ? "达人池" : "标签字典"} 视图展示`;
+  const tabLabels = {
+    creators: "达人池",
+    tags: "标签字典",
+    manage: "标签维护",
+  };
+  elements.resultSubtitle.textContent = `合作门槛 ${state.minCoop} 次，当前以 ${tabLabels[state.activeTab] || "达人池"} 视图展示`;
   renderActiveFilters();
 
   if (!filteredCreators.length) {
     elements.creatorTableBody.innerHTML = `
       <tr>
-        <td colspan="7">
+        <td colspan="8">
           <div class="empty-state">当前筛选条件下没有匹配达人，可以放宽品牌、内容或合作次数。</div>
         </td>
       </tr>
@@ -373,7 +554,12 @@ function renderCreatorRows(filteredCreators) {
       <td>${renderPills(splitMultiValue(creator["适配品牌"]), "is-warm")}</td>
       <td>${renderPills(creator.contentTags, "")}</td>
       <td>${renderPills(creator.productTags, "is-muted")}</td>
+      <td><button class="ghost-button table-action" type="button">编辑标签</button></td>
     `;
+    row.querySelector(".table-action").addEventListener("click", (event) => {
+      event.stopPropagation();
+      openDetail(creator);
+    });
     row.addEventListener("click", () => openDetail(creator));
     elements.creatorTableBody.appendChild(row);
   });
@@ -409,13 +595,13 @@ function openDetail(creator) {
         ${renderInputField("主页链接", creator["主页链接"], "text", "主页链接")}
         ${renderInputField("达人昵称", creator["达人昵称"], "text", "达人昵称")}
         ${renderSelectField("内容一级标签", creator["内容一级标签"], tagOptions.contentPrimary)}
-        ${renderInputField("内容二级标签", creator["内容二级标签"], "text", "多个可用 / 分隔")}
+        ${renderSelectField("内容二级标签", creator["内容二级标签"], tagOptions.contentSecondary)}
         ${renderSelectField("内容形式标签", creator["内容形式标签"], tagOptions.contentFormat)}
         ${renderSelectField("人设/风格标签", creator["人设/风格标签"], tagOptions.persona)}
         ${renderSelectField("受众标签", creator["受众标签"], tagOptions.audience)}
         ${renderSelectField("带货一级类目", creator["带货一级类目"], tagOptions.productPrimary)}
-        ${renderInputField("带货二级类目", creator["带货二级类目"], "text", "多个可用 / 分隔")}
-        ${renderInputField("适配品牌", creator["适配品牌"], "text", "多个可用 / 分隔")}
+        ${renderSelectField("带货二级类目", creator["带货二级类目"], tagOptions.productSecondary)}
+        ${renderInputField("适配品牌", creator["适配品牌"], "text", "多个可用 / 分隔", "多个品牌可用 / 分隔")}
         ${renderSelectField("转化形式", creator["转化形式"], tagOptions.conversion)}
         ${renderSelectField("合作分层", creator["合作分层"], tagOptions.tier)}
         ${renderSelectField("是否已打标", creator["是否已打标"] || "待处理", tagOptions.progress)}
@@ -425,7 +611,7 @@ function openDetail(creator) {
           <textarea name="备注" placeholder="补充达人风格、历史表现、适配建议">${escapeHtml(creator["备注"] || "")}</textarea>
         </label>
         <div class="editor-actions is-wide">
-          <p class="editor-meta">修改后会自动保存到当前浏览器，可再用“导出全部打标”带走结果。</p>
+          <p class="editor-meta">想新增下拉里没有的标签，先到“标签维护”页新增，再回来选择。</p>
           <button class="solid-button" type="submit">保存当前达人</button>
         </div>
       </form>
@@ -443,17 +629,19 @@ function openDetail(creator) {
   }
 }
 
-function renderInputField(label, value, type, placeholder) {
+function renderInputField(label, value, type, placeholder, hint = "") {
   return `
     <label class="field">
       <span>${label}</span>
       <input name="${label}" type="${type}" value="${escapeHtml(value || "")}" placeholder="${placeholder}" />
+      ${hint ? `<span class="field-hint">${hint}</span>` : ""}
     </label>
   `;
 }
 
 function renderSelectField(label, value, options) {
-  const choices = ['<option value="">请选择</option>', ...options.map((option) => `<option value="${escapeHtml(option)}" ${option === value ? "selected" : ""}>${option}</option>`)];
+  const mergedOptions = value && !options.includes(value) ? [value, ...options] : options;
+  const choices = ['<option value="">请选择</option>', ...mergedOptions.map((option) => `<option value="${escapeHtml(option)}" ${option === value ? "selected" : ""}>${option}</option>`)];
   return `
     <label class="field">
       <span>${label}</span>
@@ -468,23 +656,7 @@ function saveCreatorFromForm(formData) {
   const creator = creators.find((item) => item["kolId"] === state.activeCreatorId);
   if (!creator) return;
 
-  [
-    "主页链接",
-    "达人昵称",
-    "内容一级标签",
-    "内容二级标签",
-    "内容形式标签",
-    "人设/风格标签",
-    "受众标签",
-    "带货一级类目",
-    "带货二级类目",
-    "适配品牌",
-    "转化形式",
-    "合作分层",
-    "是否已打标",
-    "打标依据链接",
-    "备注",
-  ].forEach((field) => {
+  EDITABLE_FIELDS.forEach((field) => {
     creator[field] = String(formData.get(field) || "").trim();
   });
 
@@ -587,6 +759,7 @@ async function init() {
   setupFilters();
   setupTabs();
   setupExport();
+  setupCustomTagManager();
   renderBrands();
   renderTagCards();
   render();
