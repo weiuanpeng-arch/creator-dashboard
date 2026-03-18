@@ -149,10 +149,51 @@
                   <p class="panel__eyebrow">Tag Maintenance</p>
                   <h2>维护自定义标签</h2>
                 </div>
-                <p class="subtle">新增后的标签会立即出现在筛选器和达人编辑表单里，保存在当前浏览器。</p>
+                <p class="subtle">这里同时管理云端同步设置、自定义标签字典和后续维护动作。</p>
               </div>
 
               <section class="manage-layout">
+                <article class="manage-card is-wide">
+                  <div class="manage-card__header">
+                    <div>
+                      <h3>云端同步设置</h3>
+                      <p class="subtle">推荐使用 Supabase 作为共享数据层。配置完成后，多人打开同一个页面也能看到同一套修改结果。</p>
+                    </div>
+                  </div>
+
+                  <form id="sync-settings-form" class="editor-grid">
+                    <label class="field">
+                      <span>Supabase URL</span>
+                      <input id="sync-supabase-url" name="supabaseUrl" type="text" placeholder="https://your-project.supabase.co" />
+                    </label>
+                    <label class="field">
+                      <span>Anon Key</span>
+                      <input id="sync-anon-key" name="anonKey" type="password" placeholder="Supabase anon key" />
+                    </label>
+                    <label class="field">
+                      <span>Workspace ID</span>
+                      <input id="sync-workspace-id" name="workspaceId" type="text" placeholder="例如：creator-dashboard-prod" />
+                    </label>
+                    <label class="field">
+                      <span>编辑人</span>
+                      <input id="sync-editor-name" name="editorName" type="text" placeholder="例如：Sherry / Tim" />
+                    </label>
+                    <label class="field is-wide">
+                      <span>写入口令</span>
+                      <input id="sync-write-passcode" name="writePasscode" type="password" placeholder="团队共享写入口令，仅保存在当前浏览器" />
+                    </label>
+                    <div class="editor-actions is-wide">
+                      <p id="sync-status" class="editor-meta">当前为本地模式。填写云端设置后即可多人同步。</p>
+                      <div class="button-row">
+                        <button class="ghost-button" id="sync-refresh" type="button">从云端刷新</button>
+                        <button class="ghost-button" id="sync-migrate-local" type="button">迁移本地缓存</button>
+                        <button class="ghost-button" id="sync-clear" type="button">切回本地</button>
+                        <button class="solid-button" type="submit">保存并连接</button>
+                      </div>
+                    </div>
+                  </form>
+                </article>
+
                 <article class="manage-card">
                   <h3>新增标签</h3>
                   <form id="custom-tag-form" class="editor-grid">
@@ -183,7 +224,7 @@
                   <div class="manage-card__header">
                     <div>
                       <h3>当前自定义标签</h3>
-                      <p class="subtle">只展示你当前浏览器里新增的标签。</p>
+                      <p id="custom-tag-scope" class="subtle">只展示你当前浏览器里新增的标签。</p>
                     </div>
                   </div>
                   <div id="custom-tag-empty" class="empty-state">还没有新增自定义标签。</div>

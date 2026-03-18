@@ -436,6 +436,10 @@ tbody tr:hover {
   background: rgba(255, 255, 255, 0.68);
 }
 
+.manage-card.is-wide {
+  grid-column: 1 / -1;
+}
+
 .manage-card h3 {
   margin: 0 0 8px;
 }
@@ -483,6 +487,13 @@ tbody tr:hover {
   display: flex;
   gap: 8px;
   align-items: center;
+}
+
+.button-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  justify-content: flex-end;
 }
 
 .detail-modal {
