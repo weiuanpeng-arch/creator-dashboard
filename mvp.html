@@ -2262,6 +2262,14 @@
       return `<a href="${escapeHtml(value)}" target="_blank" rel="noopener noreferrer" class="button-like" style="padding:8px 12px; font-size:12px;">查看视频</a>`;
     }
 
+    function renderVideoIdCell(videoId, url) {
+      const id = String(videoId || "").trim();
+      const value = String(url || "").trim();
+      if (!id) return '<span class="mini">无视频ID</span>';
+      if (!value) return escapeHtml(id);
+      return `<a href="${escapeHtml(value)}" target="_blank" rel="noopener noreferrer">${escapeHtml(id)}</a>`;
+    }
+
     function renderLevelBreakdownCell(levels) {
       if (!levels || !levels.length) return '<span class="mini">无层级数据</span>';
       return `
@@ -2340,7 +2348,7 @@
           title: "交易明细",
           desc: "交易归因口径，粒度为视频 x 商品归因记录。",
           tag: "Transaction",
-          headers: ["Brand", "Creator", "Level", "Product Name", "PID", "Period", "GMV", "Orders", "Items Sold", "Video ID", "Video"],
+          headers: ["Brand", "Creator", "Level", "Product Name", "PID", "Period", "GMV", "Orders", "Items Sold", "Video ID"],
           rowBuilder: (row) => [
             row.brand,
             row.creator_name,
@@ -2351,8 +2359,7 @@
             formatRp(row.gmv),
             formatInt(row.orders),
             formatInt(row.items_sold),
-            row.video_id,
-            renderVideoLinkCell(row.video_link)
+            renderVideoIdCell(row.video_id, row.video_link)
           ]
         };
       }
@@ -2362,7 +2369,7 @@
           title: "播放明细",
           desc: "视频播放表现口径，重点看 VV、互动、CTR、完播率。",
           tag: "Performance",
-          headers: ["Brand", "Creator", "Level", "Product Name", "VV", "Likes", "Comments", "Shares", "CTR", "Finish Rate", "Video ID", "Video"],
+          headers: ["Brand", "Creator", "Level", "Product Name", "VV", "Likes", "Comments", "Shares", "CTR", "Finish Rate", "Video ID"],
           rowBuilder: (row) => [
             row.brand,
             row.creator_name,
@@ -2374,8 +2381,7 @@
             formatInt(row.shares),
             formatPct(row.ctr),
             formatPct(row.finish_rate),
-            row.video_id,
-            renderVideoLinkCell(row.video_link)
+            renderVideoIdCell(row.video_id, row.video_link)
           ]
         };
       }
@@ -2407,12 +2413,12 @@
           title: "Refund 明细",
           desc: "同时看达人和视频两个层级的订单、退款金额、退款件数、退货率，并标记小样本和跨期退款口径。",
           tag: "Refund",
-          headers: ["Type", "Brand", "Creator", "Video ID", "Level", "Videos", "Orders", "Items Sold", "Refunds", "Items Refunded", "Return Rate", "Flags", "Video"],
+          headers: ["Type", "Brand", "Creator", "Video ID", "Level", "Videos", "Orders", "Items Sold", "Refunds", "Items Refunded", "Return Rate", "Flags"],
           rowBuilder: (row) => [
             row.entity_type,
             row.brand,
             row.creator_name || '<span class="mini">无</span>',
-            row.video_id || '<span class="mini">达人汇总</span>',
+            row.entity_type === "视频" ? renderVideoIdCell(row.video_id, row.video_link) : '<span class="mini">达人汇总</span>',
             `<span class="pill ${row.creator_level === "L3" ? "" : "green"}">${row.creator_level || "L3"}</span>`,
             formatInt(row.video_count),
             formatInt(row.orders),
@@ -2420,8 +2426,7 @@
             formatRp(row.refunds),
             formatInt(row.items_refunded),
             renderRefundRateCell(row),
-            renderRefundFlags(row),
-            row.entity_type === "视频" ? renderVideoLinkCell(row.video_link) : '<span class="mini">达人汇总</span>'
+            renderRefundFlags(row)
           ]
         };
       }
@@ -2430,7 +2435,7 @@
         title: "联动明细",
         desc: "同一条视频同时存在播放表现和交易归因时的联动分析。",
         tag: "Linkage",
-        headers: ["Brand", "Creator", "Level", "Product Name", "VV", "CTR", "Finish Rate", "Txn GMV", "Txn Orders", "Period", "Video ID", "Video"],
+        headers: ["Brand", "Creator", "Level", "Product Name", "VV", "CTR", "Finish Rate", "Txn GMV", "Txn Orders", "Period", "Video ID"],
         rowBuilder: (row) => [
           row.brand,
           row.creator_name,
@@ -2442,8 +2447,7 @@
           formatRp(row.txn_gmv),
           formatInt(row.txn_orders),
           row.product_period || '<span class="mini">未设置</span>',
-          row.video_id,
-          renderVideoLinkCell(row.video_link)
+          renderVideoIdCell(row.video_id, row.video_link)
         ]
       };
     }
