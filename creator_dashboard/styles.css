@@ -191,6 +191,16 @@ body::before {
   color: var(--muted);
 }
 
+.form-alert {
+  padding: 12px 14px;
+  border-radius: 14px;
+  border: 1px solid rgba(202, 90, 52, 0.22);
+  background: rgba(202, 90, 52, 0.08);
+  color: var(--accent);
+  font-size: 13px;
+  line-height: 1.55;
+}
+
 .field input,
 .field select {
   appearance: none;
@@ -367,6 +377,23 @@ tbody tr:hover {
 .creator-name span {
   color: var(--muted);
   font-size: 13px;
+}
+
+.creator-link {
+  color: var(--ink);
+  font-size: 15px;
+  font-weight: 700;
+  text-decoration: none;
+  text-underline-offset: 3px;
+}
+
+.creator-link:hover {
+  color: var(--accent);
+  text-decoration: underline;
+}
+
+.creator-link--detail {
+  font-size: inherit;
 }
 
 .pill-group {

@@ -145,6 +145,27 @@ function escapeHtml(value) {
     .replaceAll('"', "&quot;");
 }
 
+function normalizeUrl(value) {
+  const raw = String(value || "").trim();
+  if (!raw) return "";
+  if (/^https?:\/\//i.test(raw)) return raw;
+  if (/^[\w.-]+\.[a-z]{2,}(\/.*)?$/i.test(raw)) return `https://${raw}`;
+  return "";
+}
+
+function getCreatorProfileUrl(creator) {
+  const explicitUrl = normalizeUrl(creator["主页链接"]);
+  if (explicitUrl) return explicitUrl;
+
+  const kolId = String(creator["kolId"] || "").trim().replace(/^@+/, "");
+  const platform = String(creator["平台"] || "").toLowerCase();
+  if (!kolId) return "";
+  if (platform.includes("tiktok")) {
+    return `https://www.tiktok.com/@${encodeURIComponent(kolId)}`;
+  }
+  return "";
+}
+
 function csvCell(value) {
   const text = String(value ?? "");
   return `"${text.replaceAll('"', '""')}"`;
@@ -538,6 +559,10 @@ function updateModeCopy() {
   elements.customTagScope.textContent = "只展示你当前浏览器里新增或暂存的标签。";
 }
 
+function canSaveSharedTag() {
+  return !hasReadSyncConfig(syncSettings) || hasWriteSyncConfig(syncSettings);
+}
+
 function populateFilterControls() {
   populateSelect(elements.brandFilter, unique(tagOptions.brand));
   populateSelect(elements.platformFilter, unique(creators.map((creator) => creator["平台"])));
@@ -889,6 +914,12 @@ async function addCustomTag(formData) {
     return;
   }
 
+  if (!canSaveSharedTag()) {
+    setCustomTagStatus("新增共享标签前，请先填写“编辑人”和“写入口令”，否则无法保存。");
+    elements.syncEditorName.focus();
+    return;
+  }
+
   const duplicated = data.tags.some((tag) => tag["标签维度"] === dimension && tag["标签名称"] === tagName);
   if (duplicated) {
     setCustomTagStatus("这个标签已经存在了，可以直接回达人池使用。");
@@ -1012,12 +1043,19 @@ function renderCreatorRows(filteredCreators) {
   elements.creatorTableBody.innerHTML = "";
 
   filteredCreators.forEach((creator) => {
+    const profileUrl = getCreatorProfileUrl(creator);
+    const creatorName = escapeHtml(creator["达人昵称"] || creator["kolId"]);
+    const creatorHandle = `@${escapeHtml(creator["kolId"])}`;
     const row = document.createElement("tr");
     row.innerHTML = `
       <td>
         <div class="creator-name">
-          <strong>${escapeHtml(creator["达人昵称"] || creator["kolId"])}</strong>
-          <span>@${escapeHtml(creator["kolId"])}</span>
+          ${
+            profileUrl
+              ? `<a class="creator-link" href="${escapeHtml(profileUrl)}" target="_blank" rel="noreferrer noopener">${creatorName}</a>`
+              : `<strong>${creatorName}</strong>`
+          }
+          <span>${creatorHandle}</span>
         </div>
       </td>
       <td><span class="pill is-warm">${escapeHtml(creator["合作次数"])} 次</span></td>
@@ -1028,6 +1066,11 @@ function renderCreatorRows(filteredCreators) {
       <td>${renderPills(creator.productTags, "is-muted")}</td>
       <td><button class="ghost-button table-action" type="button">编辑标签</button></td>
     `;
+    row.querySelectorAll(".creator-link").forEach((link) => {
+      link.addEventListener("click", (event) => {
+        event.stopPropagation();
+      });
+    });
     row.querySelector(".table-action").addEventListener("click", (event) => {
       event.stopPropagation();
       openDetail(creator);
@@ -1067,7 +1110,11 @@ function renderSelectField(label, value, options) {
 
 function openDetail(creator) {
   state.activeCreatorId = creator["kolId"];
-  elements.detailTitle.textContent = creator["达人昵称"] || creator["kolId"];
+  const detailName = creator["达人昵称"] || creator["kolId"];
+  const profileUrl = getCreatorProfileUrl(creator);
+  elements.detailTitle.innerHTML = profileUrl
+    ? `<a class="creator-link creator-link--detail" href="${escapeHtml(profileUrl)}" target="_blank" rel="noreferrer noopener">${escapeHtml(detailName)}</a>`
+    : escapeHtml(detailName);
   elements.detailSubtitle.textContent = `@${creator["kolId"]} · ${creator["平台"] || "-"} · 合作 ${creator["合作次数"]} 次`;
 
   const editorHint = syncConnected
