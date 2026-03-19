@@ -2122,11 +2122,11 @@
           periodMap.set(row.product_period, current);
           (row.product_breakdown || []).forEach((product) => {
             productRows.push({
-              label: product.product_name_raw || product.product_id || "未识别产品",
+              label: product.product_name_cn || product.product_name_raw || product.product_id || "未识别产品",
               sub: `${row.product_period} / ${row.brand} / 达人 ${formatInt(product.creator_count)}`,
               metric: product.txn_gmv,
               collapsibleLabel: true,
-              secondaryLabel: product.product_name_cn
+              secondaryLabel: product.product_name_raw
             });
           });
         });
@@ -2265,7 +2265,7 @@
           <div class="detail-list">
             ${products.map((item) => `
               <div class="detail-row">
-                ${renderCollapsibleText(item.product_name_raw || item.product_id || "未识别产品", item.product_name_cn, 24)}
+                ${renderCollapsibleText(item.product_name_cn || item.product_name_raw || item.product_id || "未识别产品", item.product_name_raw, 24)}
               <div class="sub-metric">PID ${escapeHtml(item.product_id || "无")} / 达人 ${formatInt(item.creator_count)} / 视频 ${formatInt(item.video_count)}</div>
               <div class="sub-metric">VV ${formatInt(item.vv)} / GMV ${formatRp(item.txn_gmv)} / Orders ${formatInt(item.txn_orders)}</div>
               ${(item.level_breakdown && item.level_breakdown.length) ? `
