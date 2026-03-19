@@ -251,12 +251,37 @@ function clearSyncSettings() {
   syncConnected = false;
 }
 
+function mergeCustomTags(remoteTags, localTags) {
+  const merged = [];
+  const seen = new Set();
+  [...remoteTags, ...localTags].forEach((tag) => {
+    const key = [tag["标签维度"] || "", tag["标签名称"] || ""].join("::");
+    if (seen.has(key)) return;
+    seen.add(key);
+    merged.push(tag);
+  });
+  return merged;
+}
+
 function getActiveCustomTags() {
-  return syncConnected ? remoteCustomTags : loadCustomTags();
+  if (!syncConnected) {
+    return loadCustomTags();
+  }
+  if (hasWriteSyncConfig(syncSettings)) {
+    return remoteCustomTags;
+  }
+  return mergeCustomTags(remoteCustomTags, loadCustomTags());
 }
 
 function getActiveOverrides() {
-  return syncConnected ? remoteOverridesById : loadOverrides();
+  const localOverrides = loadOverrides();
+  if (!syncConnected) {
+    return localOverrides;
+  }
+  if (hasWriteSyncConfig(syncSettings)) {
+    return remoteOverridesById;
+  }
+  return { ...remoteOverridesById, ...localOverrides };
 }
 
 function normalizeStoredFields(fields = {}) {
@@ -390,8 +415,14 @@ async function loadRemoteState() {
   );
   remoteCustomTags = (remoteTagRows || []).map(mapRemoteTagToLocal);
 
-  persistOverrideStore(remoteOverridesById);
-  persistCustomTags(remoteCustomTags);
+  if (hasWriteSyncConfig(syncSettings)) {
+    persistOverrideStore(remoteOverridesById);
+    persistCustomTags(remoteCustomTags);
+    return;
+  }
+
+  persistOverrideStore({ ...remoteOverridesById, ...loadOverrides() });
+  persistCustomTags(mergeCustomTags(remoteCustomTags, loadCustomTags()));
 }
 
 async function remoteUpsertCreatorOverride(kolId, changedFields) {
@@ -489,10 +520,11 @@ function updateModeCopy() {
   if (syncConnected) {
     if (hasWriteSyncConfig(syncSettings)) {
       setSaveStatus(`云端同步已连接：${syncSettings.workspaceId} · 修改会实时写入共享库`);
+      elements.customTagScope.textContent = `当前展示工作区 ${syncSettings.workspaceId} 的共享自定义标签。`;
     } else {
-      setSaveStatus(`已连接共享库：${syncSettings.workspaceId} · 当前默认展示最新云端标签，填写编辑信息后可直接保存`);
+      setSaveStatus(`已连接共享库：${syncSettings.workspaceId} · 当前为共享只读模式，你的新增和修改会暂存在当前浏览器`);
+      elements.customTagScope.textContent = `当前同时展示工作区 ${syncSettings.workspaceId} 的共享标签，以及你本机暂存的本地标签。`;
     }
-    elements.customTagScope.textContent = `当前展示工作区 ${syncSettings.workspaceId} 的共享自定义标签。`;
     return;
   }
 
