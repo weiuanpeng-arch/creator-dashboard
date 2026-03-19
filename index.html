@@ -2262,9 +2262,17 @@
       return `<a href="${escapeHtml(value)}" target="_blank" rel="noopener noreferrer" class="button-like" style="padding:8px 12px; font-size:12px;">查看视频</a>`;
     }
 
-    function renderVideoIdCell(videoId, url) {
+    function buildTikTokVideoUrl(creatorName, videoId, fallbackUrl = "") {
+      const creator = String(creatorName || "").trim().replace(/^@+/, "");
       const id = String(videoId || "").trim();
-      const value = String(url || "").trim();
+      if (creator && id) return `https://www.tiktok.com/@${encodeURIComponent(creator)}/video/${encodeURIComponent(id)}`;
+      const fallback = String(fallbackUrl || "").trim();
+      return fallback || "";
+    }
+
+    function renderVideoIdCell(videoId, creatorName, url) {
+      const id = String(videoId || "").trim();
+      const value = buildTikTokVideoUrl(creatorName, videoId, url);
       if (!id) return '<span class="mini">无视频ID</span>';
       if (!value) return escapeHtml(id);
       return `<a href="${escapeHtml(value)}" target="_blank" rel="noopener noreferrer">${escapeHtml(id)}</a>`;
@@ -2359,7 +2367,7 @@
             formatRp(row.gmv),
             formatInt(row.orders),
             formatInt(row.items_sold),
-            renderVideoIdCell(row.video_id, row.video_link)
+            renderVideoIdCell(row.video_id, row.creator_name, row.video_link)
           ]
         };
       }
@@ -2381,7 +2389,7 @@
             formatInt(row.shares),
             formatPct(row.ctr),
             formatPct(row.finish_rate),
-            renderVideoIdCell(row.video_id, row.video_link)
+            renderVideoIdCell(row.video_id, row.creator_name, row.video_link)
           ]
         };
       }
@@ -2418,7 +2426,7 @@
             row.entity_type,
             row.brand,
             row.creator_name || '<span class="mini">无</span>',
-            row.entity_type === "视频" ? renderVideoIdCell(row.video_id, row.video_link) : '<span class="mini">达人汇总</span>',
+            row.entity_type === "视频" ? renderVideoIdCell(row.video_id, row.creator_name, row.video_link) : '<span class="mini">达人汇总</span>',
             `<span class="pill ${row.creator_level === "L3" ? "" : "green"}">${row.creator_level || "L3"}</span>`,
             formatInt(row.video_count),
             formatInt(row.orders),
@@ -2447,7 +2455,7 @@
           formatRp(row.txn_gmv),
           formatInt(row.txn_orders),
           row.product_period || '<span class="mini">未设置</span>',
-          renderVideoIdCell(row.video_id, row.video_link)
+          renderVideoIdCell(row.video_id, row.creator_name, row.video_link)
         ]
       };
     }
