@@ -986,6 +986,7 @@
       return {
         creator: findKey(sample, ["Creator name"]),
         videoId: findKey(sample, ["Video ID"]),
+        videoLink: findKey(sample, ["Video link", "Video Link"]),
         time: findKey(sample, ["Post date"]),
         productId: findKey(sample, ["Product ID", "PID"]),
         productName: findKey(sample, ["Product name"]),
@@ -1080,6 +1081,7 @@
             brand: resolveBrand(productNameRaw, file.name),
             creator_name: String(row[columns.creator] || "").trim(),
             video_id: String(row[columns.videoId] || "").trim(),
+            video_link: String(row[columns.videoLink] || "").trim(),
             date_value: parseDateValue(row[columns.time]),
             date_label: parseDateLabel(row[columns.time]),
             product_id: String(row[columns.productId] || "").trim(),
@@ -1254,12 +1256,19 @@
     }
 
     function buildPerformanceRows(dimensions) {
+      const videoLinkMap = new Map();
+      state.merged.transactionRows.forEach((row) => {
+        if (row.video_id && row.video_link && !videoLinkMap.has(row.video_id)) {
+          videoLinkMap.set(row.video_id, row.video_link);
+        }
+      });
       state.merged.performanceRows = state.raw.performanceRows.map((row) => {
         const lifecycle = row.product_id ? dimensions.lifecycleMap.get(row.product_id) : null;
         const creatorKey = normalizeText(row.creator_name);
         const creatorLevel = dimensions.creatorMap.get(`${row.brand}__${creatorKey}`) || "L3";
         return {
           ...row,
+          video_link: videoLinkMap.get(row.video_id) || "",
           creator_level: creatorLevel,
           product_name_cn: lifecycle?.product_name_cn || "",
           product_period: lifecycle?.product_period || "",
@@ -1274,6 +1283,7 @@
         const current = txnByVideo.get(row.video_id) || {
           brand: row.brand,
           video_id: row.video_id,
+          video_link: row.video_link || "",
           creator_name: row.creator_name,
           creator_level: row.creator_level,
           txn_gmv: 0,
@@ -1282,6 +1292,7 @@
           product_periods: new Set(),
           product_names: new Set()
         };
+        current.video_link = current.video_link || row.video_link || "";
         current.txn_gmv += row.gmv;
         current.txn_orders += row.orders;
         current.txn_date_value = current.txn_date_value || row.date_value;
@@ -1300,6 +1311,7 @@
             creator_name: row.creator_name,
             creator_level: row.creator_level,
             video_id: row.video_id,
+            video_link: row.video_link || txn.video_link || "",
             date_label: row.date_label,
             date_value: row.date_value,
             txn_date_value: txn.txn_date_value || "",
@@ -1556,6 +1568,7 @@
             creator_name: row.creator_name,
             creator_level: row.creator_level,
             video_id: "",
+            video_link: "",
             video_count: 0,
             orders: 0,
             items_sold: 0,
@@ -1579,6 +1592,7 @@
             creator_name: row.creator_name,
             creator_level: row.creator_level,
             video_id: row.video_id,
+            video_link: row.video_link || "",
             video_count: 1,
             orders: 0,
             items_sold: 0,
@@ -2242,6 +2256,12 @@
       `;
     }
 
+    function renderVideoLinkCell(url) {
+      const value = String(url || "").trim();
+      if (!value) return '<span class="mini">无链接</span>';
+      return `<a href="${escapeHtml(value)}" target="_blank" rel="noopener noreferrer" class="button-like" style="padding:8px 12px; font-size:12px;">查看视频</a>`;
+    }
+
     function renderLevelBreakdownCell(levels) {
       if (!levels || !levels.length) return '<span class="mini">无层级数据</span>';
       return `
@@ -2320,7 +2340,7 @@
           title: "交易明细",
           desc: "交易归因口径，粒度为视频 x 商品归因记录。",
           tag: "Transaction",
-          headers: ["Brand", "Creator", "Level", "Product Name", "PID", "Period", "GMV", "Orders", "Items Sold", "Video ID"],
+          headers: ["Brand", "Creator", "Level", "Product Name", "PID", "Period", "GMV", "Orders", "Items Sold", "Video ID", "Video"],
           rowBuilder: (row) => [
             row.brand,
             row.creator_name,
@@ -2331,7 +2351,8 @@
             formatRp(row.gmv),
             formatInt(row.orders),
             formatInt(row.items_sold),
-            row.video_id
+            row.video_id,
+            renderVideoLinkCell(row.video_link)
           ]
         };
       }
@@ -2341,7 +2362,7 @@
           title: "播放明细",
           desc: "视频播放表现口径，重点看 VV、互动、CTR、完播率。",
           tag: "Performance",
-          headers: ["Brand", "Creator", "Level", "Product Name", "VV", "Likes", "Comments", "Shares", "CTR", "Finish Rate", "Video ID"],
+          headers: ["Brand", "Creator", "Level", "Product Name", "VV", "Likes", "Comments", "Shares", "CTR", "Finish Rate", "Video ID", "Video"],
           rowBuilder: (row) => [
             row.brand,
             row.creator_name,
@@ -2353,7 +2374,8 @@
             formatInt(row.shares),
             formatPct(row.ctr),
             formatPct(row.finish_rate),
-            row.video_id
+            row.video_id,
+            renderVideoLinkCell(row.video_link)
           ]
         };
       }
@@ -2385,7 +2407,7 @@
           title: "Refund 明细",
           desc: "同时看达人和视频两个层级的订单、退款金额、退款件数、退货率，并标记小样本和跨期退款口径。",
           tag: "Refund",
-          headers: ["Type", "Brand", "Creator", "Video ID", "Level", "Videos", "Orders", "Items Sold", "Refunds", "Items Refunded", "Return Rate", "Flags"],
+          headers: ["Type", "Brand", "Creator", "Video ID", "Level", "Videos", "Orders", "Items Sold", "Refunds", "Items Refunded", "Return Rate", "Flags", "Video"],
           rowBuilder: (row) => [
             row.entity_type,
             row.brand,
@@ -2398,7 +2420,8 @@
             formatRp(row.refunds),
             formatInt(row.items_refunded),
             renderRefundRateCell(row),
-            renderRefundFlags(row)
+            renderRefundFlags(row),
+            row.entity_type === "视频" ? renderVideoLinkCell(row.video_link) : '<span class="mini">达人汇总</span>'
           ]
         };
       }
@@ -2407,7 +2430,7 @@
         title: "联动明细",
         desc: "同一条视频同时存在播放表现和交易归因时的联动分析。",
         tag: "Linkage",
-        headers: ["Brand", "Creator", "Level", "Product Name", "VV", "CTR", "Finish Rate", "Txn GMV", "Txn Orders", "Period", "Video ID"],
+        headers: ["Brand", "Creator", "Level", "Product Name", "VV", "CTR", "Finish Rate", "Txn GMV", "Txn Orders", "Period", "Video ID", "Video"],
         rowBuilder: (row) => [
           row.brand,
           row.creator_name,
@@ -2419,7 +2442,8 @@
           formatRp(row.txn_gmv),
           formatInt(row.txn_orders),
           row.product_period || '<span class="mini">未设置</span>',
-          row.video_id
+          row.video_id,
+          renderVideoLinkCell(row.video_link)
         ]
       };
     }
