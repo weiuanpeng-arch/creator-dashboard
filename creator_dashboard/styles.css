@@ -166,6 +166,10 @@ body::before {
   gap: 24px;
 }
 
+.core-layout {
+  grid-template-columns: 320px minmax(0, 1fr);
+}
+
 .filters,
 .content {
   display: flex;
@@ -228,6 +232,41 @@ body::before {
 .brand-grid {
   display: grid;
   gap: 12px;
+}
+
+.assumption-list,
+.metric-list {
+  display: grid;
+  gap: 12px;
+}
+
+.assumption-item,
+.metric-card {
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  padding: 14px;
+  background: rgba(255, 255, 255, 0.72);
+  color: var(--muted);
+  line-height: 1.6;
+  font-size: 14px;
+}
+
+.metric-card strong {
+  display: block;
+  margin: 8px 0 6px;
+  font-size: 30px;
+  line-height: 1;
+  color: var(--ink);
+  font-family: Georgia, "Times New Roman", serif;
+}
+
+.metric-card__eyebrow {
+  margin: 0;
+  color: var(--secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
+  font-size: 11px;
+  font-weight: 700;
 }
 
 .brand-card {

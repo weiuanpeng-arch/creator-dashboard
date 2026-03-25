@@ -1,0 +1,183 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>核心达人监控看板</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <div class="shell">
+      <header class="hero">
+        <div class="hero__copy">
+          <p class="eyebrow">Core Creator Operations</p>
+          <h1>核心达人监控看板</h1>
+          <p class="hero__text">
+            按你给的监控模板，把现有达人标签库映射成一版核心运营看板，保留原始达人数据，并补上分层、优先级、下一步动作。
+          </p>
+          <div class="hero__meta">
+            <span id="generated-at">数据加载中...</span>
+            <span class="dot"></span>
+            <span>当前基于已有达人标签库自动映射，缺失GMV类字段先保位</span>
+          </div>
+        </div>
+        <div class="hero__actions">
+          <a class="ghost-button" href="./index.html">返回达人标签库</a>
+          <a class="ghost-button" href="./data/core_creator_overview.csv" download>下载总览 CSV</a>
+          <a class="solid-button" href="./data/core_creator_overview.csv" download>下载当前总览</a>
+        </div>
+      </header>
+
+      <main class="layout core-layout">
+        <aside class="filters">
+          <section class="panel">
+            <div class="panel__header">
+              <p class="panel__eyebrow">Filters</p>
+              <h2>核心筛选</h2>
+            </div>
+
+            <label class="field">
+              <span>搜索达人</span>
+              <input id="search-input" type="search" placeholder="达人ID / 名称 / 备注" />
+            </label>
+
+            <div class="grid-two">
+              <label class="field">
+                <span>达人分层</span>
+                <select id="level-filter"></select>
+              </label>
+              <label class="field">
+                <span>当前合作状态</span>
+                <select id="status-filter"></select>
+              </label>
+            </div>
+
+            <div class="grid-two">
+              <label class="field">
+                <span>优先级</span>
+                <select id="priority-filter"></select>
+              </label>
+              <label class="field">
+                <span>平台</span>
+                <select id="platform-filter"></select>
+              </label>
+            </div>
+          </section>
+
+          <section class="panel">
+            <div class="panel__header">
+              <p class="panel__eyebrow">Assumptions</p>
+              <h2>映射说明</h2>
+            </div>
+            <div id="assumption-list" class="assumption-list"></div>
+          </section>
+        </aside>
+
+        <section class="content">
+          <section class="stats" id="stats-grid"></section>
+
+          <section class="panel tabs-panel">
+            <div class="tabs">
+              <button class="tab is-active" data-tab="overview" type="button">达人总览</button>
+              <button class="tab" data-tab="focus" type="button">L0/L1重点达人池</button>
+              <button class="tab" data-tab="records" type="button">合作记录明细</button>
+              <button class="tab" data-tab="metrics" type="button">运营驾驶舱</button>
+            </div>
+
+            <div class="tab-panel is-active" data-panel="overview">
+              <div class="list-toolbar">
+                <div>
+                  <p class="panel__eyebrow">Overview</p>
+                  <h2 id="result-title">核心达人总览</h2>
+                </div>
+                <p id="result-subtitle" class="subtle">基于现有达人标签库生成</p>
+              </div>
+              <div class="table-wrap">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>达人</th>
+                      <th>分层</th>
+                      <th>状态</th>
+                      <th>优先级</th>
+                      <th>近30天</th>
+                      <th>复投</th>
+                      <th>下一步动作</th>
+                      <th>备注</th>
+                    </tr>
+                  </thead>
+                  <tbody id="overview-body"></tbody>
+                </table>
+              </div>
+            </div>
+
+            <div class="tab-panel" data-panel="focus">
+              <div class="list-toolbar">
+                <div>
+                  <p class="panel__eyebrow">Focus Pool</p>
+                  <h2>L0 / L1 重点达人池</h2>
+                </div>
+                <p class="subtle">高优先级核心达人，适合重点跟进</p>
+              </div>
+              <div class="table-wrap">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>达人</th>
+                      <th>分层</th>
+                      <th>平台</th>
+                      <th>近30天</th>
+                      <th>状态</th>
+                      <th>优先级</th>
+                      <th>动作</th>
+                    </tr>
+                  </thead>
+                  <tbody id="focus-body"></tbody>
+                </table>
+              </div>
+            </div>
+
+            <div class="tab-panel" data-panel="records">
+              <div class="list-toolbar">
+                <div>
+                  <p class="panel__eyebrow">Records</p>
+                  <h2>合作记录明细</h2>
+                </div>
+                <p class="subtle">当前先按最近一条合作摘要保位，后续可接真实明细</p>
+              </div>
+              <div class="table-wrap">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>达人</th>
+                      <th>合作日期</th>
+                      <th>产品</th>
+                      <th>内容类型</th>
+                      <th>是否出单</th>
+                      <th>是否复投</th>
+                      <th>链接</th>
+                    </tr>
+                  </thead>
+                  <tbody id="record-body"></tbody>
+                </table>
+              </div>
+            </div>
+
+            <div class="tab-panel" data-panel="metrics">
+              <div class="list-toolbar">
+                <div>
+                  <p class="panel__eyebrow">Ops Cockpit</p>
+                  <h2>运营驾驶舱</h2>
+                </div>
+                <p class="subtle">帮助你快速看重点池健康度</p>
+              </div>
+              <div class="metric-list" id="metric-list"></div>
+            </div>
+          </section>
+        </section>
+      </main>
+    </div>
+
+    <script src="./core_dashboard.js" type="module"></script>
+  </body>
+</html>
