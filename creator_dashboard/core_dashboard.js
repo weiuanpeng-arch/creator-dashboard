@@ -40,6 +40,17 @@ function unique(items) {
   return [...new Set(items.filter(Boolean))].sort((a, b) => a.localeCompare(b, "zh-CN"));
 }
 
+function toNumber(value) {
+  const num = Number(value);
+  return Number.isFinite(num) ? num : 0;
+}
+
+function formatNumber(value) {
+  const num = toNumber(value);
+  if (!num) return "0";
+  return num.toLocaleString("zh-CN", { maximumFractionDigits: 2 });
+}
+
 function populateSelect(select, options) {
   select.innerHTML = "";
   ["全部", ...options].forEach((option) => {
@@ -68,11 +79,18 @@ function matches(row) {
 }
 
 function filteredOverview() {
-  return payload.overview.filter(matches);
+  return [...payload.overview.filter(matches)].sort((a, b) => {
+    const gmvGap = toNumber(b["历史总GMV"]) - toNumber(a["历史总GMV"]);
+    if (gmvGap !== 0) return gmvGap;
+    const recentGap = toNumber(b["90天GMV"]) - toNumber(a["90天GMV"]);
+    if (recentGap !== 0) return recentGap;
+    return String(a["达人名称"] || "").localeCompare(String(b["达人名称"] || ""), "zh-CN");
+  });
 }
 
 function filteredFocus() {
-  return payload.focusPool.filter(matches);
+  const focusIds = new Set(payload.focusPool.map((item) => item["达人ID"]));
+  return filteredOverview().filter((item) => focusIds.has(item["达人ID"]));
 }
 
 function filteredRecords() {
@@ -132,8 +150,9 @@ function renderOverview() {
           </td>
           <td><span class="pill">${escapeHtml(row["达人分层(L0/L1/L2/L3)"])}</span></td>
           <td><span class="pill ${row["当前合作状态"] === "在合作" ? "is-warm" : "is-muted"}">${escapeHtml(row["当前合作状态"])}</span></td>
+          <td>${escapeHtml(formatNumber(row["历史总GMV"]))}</td>
+          <td>${escapeHtml(formatNumber(row["90天GMV"]))}</td>
           <td><span class="pill ${row["优先级"] === "高" ? "is-warm" : row["优先级"] === "中" ? "" : "is-muted"}">${escapeHtml(row["优先级"])}</span></td>
-          <td>${escapeHtml(row["近30天合作次数"])} 次</td>
           <td>${escapeHtml(row["是否进入复投(Y/N)"])}</td>
           <td>${escapeHtml(row["下一步动作"])}</td>
           <td>${escapeHtml(row["备注"])}</td>
@@ -155,7 +174,7 @@ function renderFocus() {
         <td>${escapeHtml(row["达人名称"])}</td>
         <td><span class="pill">${escapeHtml(row["达人分层(L0/L1/L2/L3)"])}</span></td>
         <td>${escapeHtml(row["平台"])}</td>
-        <td>${escapeHtml(row["近30天合作次数"])} 次</td>
+        <td>${escapeHtml(formatNumber(row["历史总GMV"]))}</td>
         <td>${escapeHtml(row["当前合作状态"])}</td>
         <td><span class="pill is-warm">${escapeHtml(row["优先级"])}</span></td>
         <td>${escapeHtml(row["下一步动作"])}</td>

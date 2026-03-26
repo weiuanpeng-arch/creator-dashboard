@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-03-26 16:02:26",
+  "generatedAt": "2026-03-26 16:16:00",
   "source": "/Users/apple/Desktop/达人多次合作监控看板_同步版.xlsx",
   "assumptions": [
     "当前网页直接读取同步版工作簿，不再使用旧的达人标签库 JSON 作为数据源。",
