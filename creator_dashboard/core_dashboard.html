@@ -13,12 +13,12 @@
           <p class="eyebrow">Core Creator Operations</p>
           <h1>核心达人监控看板</h1>
           <p class="hero__text">
-            按你给的监控模板，把现有达人标签库映射成一版核心运营看板，保留原始达人数据，并补上分层、优先级、下一步动作。
+            当前页面直接读取同步版工作簿，先以四店铺 2 月 22 日到 3 月 24 日的月度基线为底，再承接 3 月 25 日之后的逐日更新。
           </p>
           <div class="hero__meta">
             <span id="generated-at">数据加载中...</span>
             <span class="dot"></span>
-            <span>当前基于已有达人标签库自动映射，缺失GMV类字段先保位</span>
+            <span>页面口径已切到同步链路，GMV 与视频指标来自导出明细聚合</span>
           </div>
         </div>
         <div class="hero__actions">
@@ -90,7 +90,7 @@
                   <p class="panel__eyebrow">Overview</p>
                   <h2 id="result-title">核心达人总览</h2>
                 </div>
-                <p id="result-subtitle" class="subtle">基于现有达人标签库生成</p>
+                <p id="result-subtitle" class="subtle">基于同步版工作簿生成</p>
               </div>
               <div class="table-wrap">
                 <table>
@@ -143,7 +143,7 @@
                   <p class="panel__eyebrow">Records</p>
                   <h2>合作记录明细</h2>
                 </div>
-                <p class="subtle">当前先按最近一条合作摘要保位，后续可接真实明细</p>
+                <p class="subtle">当前展示同步版工作簿中的合作摘要，后续可继续接数据库补数</p>
               </div>
               <div class="table-wrap">
                 <table>
@@ -178,6 +178,7 @@
       </main>
     </div>
 
+    <script src="./data/core_creator_dashboard.js"></script>
     <script src="./core_dashboard.js" type="module"></script>
   </body>
 </html>

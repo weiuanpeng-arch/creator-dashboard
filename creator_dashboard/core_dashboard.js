@@ -114,7 +114,7 @@ function renderAssumptions() {
 function renderOverview() {
   const rows = filteredOverview();
   elements.resultTitle.textContent = `${rows.length} 个核心监控达人`;
-  elements.resultSubtitle.textContent = `按新模板映射生成，当前视图：${state.activeTab}`;
+  elements.resultSubtitle.textContent = `按同步版工作簿生成，当前视图：${state.activeTab}`;
   if (!rows.length) {
     elements.overviewBody.innerHTML = '<tr><td colspan="8"><div class="empty-state">当前筛选下没有匹配达人。</div></td></tr>';
     return;
@@ -239,11 +239,15 @@ function setupFilters() {
 }
 
 async function init() {
-  const response = await fetch(`./data/core_creator_dashboard.json?ts=${Date.now()}`, { cache: "no-store" });
-  if (!response.ok) {
-    throw new Error(`加载失败：${response.status}`);
+  if (window.__CORE_CREATOR_DASHBOARD__) {
+    payload = window.__CORE_CREATOR_DASHBOARD__;
+  } else {
+    const response = await fetch(`./data/core_creator_dashboard.json?ts=${Date.now()}`, { cache: "no-store" });
+    if (!response.ok) {
+      throw new Error(`加载失败：${response.status}`);
+    }
+    payload = await response.json();
   }
-  payload = await response.json();
   elements.generatedAt.textContent = `数据生成时间 ${payload.generatedAt}`;
   populateFilters();
   renderAssumptions();

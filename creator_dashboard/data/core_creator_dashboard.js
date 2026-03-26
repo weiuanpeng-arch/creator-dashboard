@@ -1,4 +1,4 @@
-{
+window.__CORE_CREATOR_DASHBOARD__ = {
   "generatedAt": "2026-03-26 16:02:26",
   "source": "/Users/apple/Desktop/达人多次合作监控看板_同步版.xlsx",
   "assumptions": [
@@ -7748,4 +7748,4 @@
       "说明": "当前重点池覆盖的一级品类与品牌数"
     }
   ]
-}
+};
