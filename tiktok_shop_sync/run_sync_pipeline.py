@@ -3,6 +3,8 @@ from __future__ import annotations
 import argparse
 import json
 import subprocess
+import urllib.error
+import urllib.request
 from datetime import date, timedelta
 from pathlib import Path
 from typing import Any
@@ -17,6 +19,9 @@ IMPORT_EXPORT_SCRIPT = BASE_DIR / "import_exported_reports.py"
 BUILD_SCRIPT = BASE_DIR / "build_sync_workbook.py"
 SYNC_SCRIPT = BASE_DIR / "sync_into_workbook.py"
 DASHBOARD_BUILD_SCRIPT = BASE_DIR.parent / "creator_dashboard" / "build_core_dashboard.py"
+CHROME_BRIDGE_DIR = BASE_DIR.parent / "chrome_bridge"
+CHROME_DEBUG_SCRIPT = CHROME_BRIDGE_DIR / "start_chrome_debug.sh"
+STORE_PROFILE_SCRIPT = CHROME_BRIDGE_DIR / "start_store_profile.sh"
 STATE_PATH = BASE_DIR / "data" / "pipeline_state.json"
 WORKBOOK_PATH = Path("/Users/apple/Desktop/达人多次合作监控看板_同步版.xlsx")
 
@@ -61,6 +66,45 @@ def run_capture(cmd: list[str]) -> str:
         detail = completed.stderr.strip() or stdout or f"exit={completed.returncode}"
         raise RuntimeError(f"{' '.join(cmd)} -> {detail}")
     return stdout
+
+
+def endpoint_ready(port: int) -> bool:
+    url = f"http://127.0.0.1:{port}/json/version"
+    try:
+        with urllib.request.urlopen(url, timeout=3) as response:
+            return response.status == 200
+    except (urllib.error.URLError, TimeoutError, ConnectionError, ValueError):
+        return False
+
+
+def launch_profile_for_store(store: dict[str, Any]) -> None:
+    port = int(store["profile_port"])
+    if endpoint_ready(port):
+        print(f"[browser] {store['store_tag']}: profile ready on {port}")
+        return
+
+    if port == 9222:
+        cmd = ["zsh", str(CHROME_DEBUG_SCRIPT), str(port)]
+    else:
+        store_key = {
+            9231: "store1",
+            9232: "store2",
+            9233: "store3",
+            9234: "store4",
+        }.get(port)
+        if not store_key:
+            raise RuntimeError(f"未配置浏览器 profile 启动脚本: port={port}")
+        cmd = ["zsh", str(STORE_PROFILE_SCRIPT), store_key, str(port)]
+
+    run(cmd)
+    if not endpoint_ready(port):
+        raise RuntimeError(f"{store['store_tag']} 浏览器 profile 启动后仍未就绪: port={port}")
+    print(f"[browser] {store['store_tag']}: launched profile on {port}")
+
+
+def ensure_browser_profiles(stores: list[dict[str, Any]]) -> None:
+    for store in stores:
+        launch_profile_for_store(store)
 
 
 def parse_iso_date(value: str) -> date:
@@ -182,11 +226,11 @@ def main() -> None:
         run(["python3", str(BUILD_SCRIPT)])
 
     selected = set(args.stores or [])
+    selected_stores = [store for store in config["stores"] if not selected or store["store_tag"] in selected]
+    ensure_browser_profiles(selected_stores)
     run_date = date.today().isoformat()
-    for store in config["stores"]:
+    for store in selected_stores:
         store_tag = store["store_tag"]
-        if selected and store_tag not in selected:
-            continue
         key = normalize_key(store_tag)
         store_state = state.setdefault("stores", {}).setdefault(key, {})
         store_state["last_attempt_at"] = run_date

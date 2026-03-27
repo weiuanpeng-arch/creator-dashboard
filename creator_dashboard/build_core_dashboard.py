@@ -253,12 +253,12 @@ def build_raw_creator_meta(workbook) -> tuple[dict[str, dict[str, object]], set[
         current = meta_by_key.get(key, {})
         candidate_score = sum(
             1
-            for header in ["达人名称", "达人主页标识", "统计日期", "店铺", "Affiliate-attributed GMV"]
+            for header in ["达人名称", "达人主页标识", "统计日期", "店铺", "Affiliate-attributed GMV", "Affiliate followers"]
             if normalize_text(row.get(header))
         )
         current_score = sum(
             1
-            for header in ["达人名称", "达人主页标识", "统计日期", "店铺", "Affiliate-attributed GMV"]
+            for header in ["达人名称", "达人主页标识", "统计日期", "店铺", "Affiliate-attributed GMV", "Affiliate followers"]
             if normalize_text(current.get(header))
         )
         if candidate_score >= current_score:
@@ -456,7 +456,7 @@ def build_row(
         "达人ID": creator_id,
         "达人名称": creator_name,
         "平台": normalize_text((focus_seed or {}).get("平台")) or "TikTok",
-        "粉丝量": normalize_text((focus_seed or {}).get("粉丝量")),
+        "粉丝量": normalize_text((focus_seed or {}).get("粉丝量")) or normalize_text((meta_row or {}).get("Affiliate followers")),
         "达人分层(L0/L1/L2/L3)": normalize_text((focus_seed or {}).get("达人分层(L0/L1/L2/L3)")),
         "达人类型": normalize_text((focus_seed or {}).get("达人类型")),
         "品牌标签": brand_tags,

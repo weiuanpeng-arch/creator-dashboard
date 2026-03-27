@@ -19,10 +19,17 @@ VIDEO_CSV = Path("/Users/apple/Documents/Playground/tiktok_shop_sync/data/normal
 CREATOR_CSV = Path("/Users/apple/Documents/Playground/tiktok_shop_sync/data/normalized/creator_performance.csv")
 CREATOR_HISTORY_CSV = Path("/Users/apple/Documents/Playground/tiktok_shop_sync/data/normalized/creator_history_gmv.csv")
 STATE_PATH = Path("/Users/apple/Documents/Playground/tiktok_shop_sync/data/pipeline_state.json")
-COOP_XLSX = Path(
-    "/Users/apple/Library/Containers/com.tencent.xinWeChat/Data/Documents/xwechat_files/"
-    "wxid_2514345143114_b48d/temp/drag/cooperation_export_1774577590040.xlsx"
-)
+COOP_XLSX_NAME = "cooperation_export_1774577590040.xlsx"
+COOP_XLSX_CANDIDATES = [
+    Path(
+        "/Users/apple/Library/Containers/com.tencent.xinWeChat/Data/Documents/xwechat_files/"
+        "wxid_2514345143114_b48d/temp/drag/cooperation_export_1774577590040.xlsx"
+    ),
+    Path(
+        "/Users/apple/Library/Containers/com.tencent.xinWeChat/Data/Documents/xwechat_files/"
+        "wxid_2514345143114_b48d/msg/file/2026-03/cooperation_export_1774577590040.xlsx"
+    ),
+]
 SKU_XLSX = Path("/Users/apple/Desktop/SKU_COST.xlsx")
 CREATOR_POOL_JSON = Path("/Users/apple/Documents/Playground/creator_dashboard/data/creator_pool.json")
 
@@ -92,6 +99,7 @@ RAW_CREATOR_HEADERS = [
     "Videos",
     "LIVE streams",
     "Avg. daily products sold",
+    "Affiliate followers",
     "Samples shipped",
     "数据批次ID",
     "原文件名",
@@ -231,6 +239,18 @@ def load_csv(path: Path) -> list[dict[str, str]]:
         return []
     with path.open("r", encoding="utf-8-sig", newline="") as handle:
         return list(csv.DictReader(handle))
+
+
+def resolve_coop_xlsx() -> Path:
+    for candidate in COOP_XLSX_CANDIDATES:
+        if candidate.exists():
+            return candidate
+    wechat_root = Path("/Users/apple/Library/Containers/com.tencent.xinWeChat/Data/Documents/xwechat_files")
+    if wechat_root.exists():
+        matches = sorted(wechat_root.rglob(COOP_XLSX_NAME), reverse=True)
+        if matches:
+            return matches[0]
+    raise FileNotFoundError(f"未找到合作表: {COOP_XLSX_NAME}")
 
 
 def load_pipeline_state() -> dict:
@@ -417,6 +437,8 @@ def aggregate_creator_rows(rows: list[dict[str, str]]) -> dict[str, dict[str, ob
             "历史总GMV": 0.0,
             "90天GMV": 0.0,
             "店铺标签": set(),
+            "粉丝量": 0.0,
+            "粉丝量统计日期": None,
         }
     )
     for row in rows:
@@ -425,11 +447,19 @@ def aggregate_creator_rows(rows: list[dict[str, str]]) -> dict[str, dict[str, ob
             continue
         stat_date = parse_date(row.get("统计日期"))
         gmv = parse_number(row.get("Affiliate-attributed GMV"))
+        followers = parse_number(row.get("Affiliate followers"))
         group = grouped[key]
         group["历史总GMV"] += gmv
         if stat_date and stat_date >= cutoff_90:
             group["90天GMV"] += gmv
         group["店铺标签"].add(normalize_text(row.get("店铺")))
+        existing_date = group.get("粉丝量统计日期")
+        if followers > 0:
+            if existing_date is None or (stat_date and stat_date > existing_date):
+                group["粉丝量"] = followers
+                group["粉丝量统计日期"] = stat_date
+            elif stat_date == existing_date and followers > parse_number(group.get("粉丝量")):
+                group["粉丝量"] = followers
     return grouped
 
 
@@ -569,7 +599,7 @@ def load_cooperation_rows(
     existing_to_name: dict[str, str],
     spu_to_skus: dict[str, set[str]],
 ) -> tuple[list[dict[str, object]], list[dict[str, object]], list[dict[str, object]]]:
-    workbook = load_workbook(COOP_XLSX, read_only=True, data_only=True)
+    workbook = load_workbook(resolve_coop_xlsx(), read_only=True, data_only=True)
     sheet = workbook[workbook.sheetnames[0]]
     headers = [normalize_text(cell.value) for cell in sheet[1]]
     exact_source, exact_existing, clean_to_source, bucket_to_clean = build_matchers(
@@ -923,6 +953,7 @@ def update_overview_sheet(
     sheet = workbook["达人总览"]
     headers = [normalize_text(cell.value) for cell in sheet[1]]
     creator_id_col = headers.index("达人ID") + 1
+    followers_col = headers.index("粉丝量") + 1
     platform_col = headers.index("平台") + 1
     type_col = headers.index("达人类型") + 1
     total_col = headers.index("历史总GMV") + 1
@@ -962,6 +993,7 @@ def update_overview_sheet(
             elif now_dt > deadline and not normalize_text(coop_stats.get("距离上次发布天数")):
                 timeout = "Y"
         sheet.cell(row=row, column=platform_col, value=normalize_text(sheet.cell(row, platform_col).value) or "TikTok")
+        sheet.cell(row=row, column=followers_col, value=int(round(parse_number(creator_stats.get("粉丝量")))) if parse_number(creator_stats.get("粉丝量")) > 0 else "")
         if not normalize_text(sheet.cell(row, type_col).value) and creator_id in creator_pool_tags:
             sheet.cell(row=row, column=type_col, value=creator_pool_tags[creator_id].get("内容一级标签", ""))
         sheet.cell(row=row, column=total_col, value=round(creator_stats.get("历史总GMV", 0.0), 2))
