@@ -554,6 +554,10 @@ function updateSyncInputs() {
   elements.coreWritePasscode.autocomplete = "new-password";
 }
 
+window.addEventListener("pageshow", () => {
+  updateSyncInputs();
+});
+
 function setupTabs() {
   elements.tabs.forEach((tab) => {
     tab.addEventListener("click", () => {
