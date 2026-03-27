@@ -550,6 +550,8 @@ function openDetail(row) {
 function updateSyncInputs() {
   elements.coreEditorName.value = syncSettings.editorName || "";
   elements.coreWritePasscode.value = syncSettings.writePasscode || "";
+  elements.coreEditorName.autocomplete = "off";
+  elements.coreWritePasscode.autocomplete = "new-password";
 }
 
 function setupTabs() {
@@ -711,6 +713,7 @@ async function init() {
   syncSettings = loadSyncSettings();
   localCoreOverridesById = loadLocalOverrides();
   updateSyncInputs();
+  window.setTimeout(updateSyncInputs, 0);
 
   baseOverview = payload.overview.map((item) => ({ ...item }));
   try {

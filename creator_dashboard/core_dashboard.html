@@ -79,11 +79,27 @@
             </div>
             <label class="field">
               <span>编辑人</span>
-              <input id="core-editor-name" type="text" placeholder="例如：Sherry / Tim" />
+              <input
+                id="core-editor-name"
+                type="text"
+                placeholder="例如：Sherry / Tim"
+                autocomplete="off"
+                autocapitalize="off"
+                autocorrect="off"
+                spellcheck="false"
+              />
             </label>
             <label class="field">
               <span>写入口令</span>
-              <input id="core-write-passcode" type="password" placeholder="团队共享写入口令" />
+              <input
+                id="core-write-passcode"
+                type="password"
+                placeholder="团队共享写入口令"
+                autocomplete="new-password"
+                autocapitalize="off"
+                autocorrect="off"
+                spellcheck="false"
+              />
             </label>
             <div class="button-row core-sync-actions">
               <button class="ghost-button" id="core-save-sync" type="button">保存设置</button>
