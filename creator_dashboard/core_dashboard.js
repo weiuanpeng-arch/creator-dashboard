@@ -1,4 +1,5 @@
-const SYNC_SETTINGS_KEY = "creator_dashboard_sync_settings_v1";
+const CORE_SYNC_SETTINGS_KEY = "core_dashboard_sync_settings_v1";
+const LEGACY_SYNC_SETTINGS_KEY = "creator_dashboard_sync_settings_v1";
 const CORE_LOCAL_OVERRIDE_KEY = "core_dashboard_local_overrides_v1";
 const PUBLIC_READ_SYNC_SETTINGS = {
   supabaseUrl: "https://sbznfjnsirajqkkcwayj.supabase.co",
@@ -95,24 +96,40 @@ function formatNumber(value) {
 
 function normalizeSyncSettings(raw = {}) {
   return {
-    supabaseUrl: String(raw.supabaseUrl || PUBLIC_READ_SYNC_SETTINGS.supabaseUrl || "").trim().replace(/\/+$/, ""),
-    anonKey: String(raw.anonKey || PUBLIC_READ_SYNC_SETTINGS.anonKey || "").trim(),
-    workspaceId: String(raw.workspaceId || PUBLIC_READ_SYNC_SETTINGS.workspaceId || "").trim(),
-    editorName: String(raw.editorName || "").trim(),
-    writePasscode: String(raw.writePasscode || "").trim(),
+    supabaseUrl: String(raw.supabaseUrl || raw.supabase_url || PUBLIC_READ_SYNC_SETTINGS.supabaseUrl || "")
+      .trim()
+      .replace(/\/+$/, ""),
+    anonKey: String(raw.anonKey || raw.anon_key || PUBLIC_READ_SYNC_SETTINGS.anonKey || "").trim(),
+    workspaceId: String(raw.workspaceId || raw.workspace_id || PUBLIC_READ_SYNC_SETTINGS.workspaceId || "").trim(),
+    editorName: String(raw.editorName || raw.editor_name || "").trim(),
+    writePasscode: String(raw.writePasscode || raw.write_passcode || "").trim(),
   };
 }
 
 function loadSyncSettings() {
   try {
-    return normalizeSyncSettings(JSON.parse(localStorage.getItem(SYNC_SETTINGS_KEY) || "{}"));
+    const current = JSON.parse(localStorage.getItem(CORE_SYNC_SETTINGS_KEY) || "{}");
+    if (current && Object.keys(current).length) {
+      return normalizeSyncSettings(current);
+    }
+    const legacy = JSON.parse(localStorage.getItem(LEGACY_SYNC_SETTINGS_KEY) || "{}");
+    if (legacy && Object.keys(legacy).length) {
+      return normalizeSyncSettings({
+        supabaseUrl: legacy.supabaseUrl || legacy.supabase_url,
+        anonKey: legacy.anonKey || legacy.anon_key,
+        workspaceId: legacy.workspaceId || legacy.workspace_id,
+        editorName: "",
+        writePasscode: "",
+      });
+    }
+    return normalizeSyncSettings();
   } catch {
     return normalizeSyncSettings();
   }
 }
 
 function persistSyncSettings(settings) {
-  localStorage.setItem(SYNC_SETTINGS_KEY, JSON.stringify(normalizeSyncSettings(settings)));
+  localStorage.setItem(CORE_SYNC_SETTINGS_KEY, JSON.stringify(normalizeSyncSettings(settings)));
 }
 
 function loadLocalOverrides() {
@@ -129,6 +146,17 @@ function persistLocalOverrides(overrides) {
 
 function setSyncStatus(text) {
   elements.coreSyncStatus.textContent = text;
+}
+
+function formatSyncError(error) {
+  const message = String(error?.message || error || "").trim();
+  if (!message) {
+    return "共享库暂时不可用，当前会继续使用本机暂存。";
+  }
+  if (/failed to fetch/i.test(message) || /networkerror/i.test(message) || /err_connection/i.test(message)) {
+    return "当前浏览器环境暂时无法连接共享库，页面仍可正常浏览并保存到本机。";
+  }
+  return message;
 }
 
 function parsePidFromText(value) {
@@ -561,7 +589,7 @@ async function refreshAfterMutation() {
   try {
     await loadRemoteOverrides();
   } catch (error) {
-    setSyncStatus(`云端刷新失败：${error.message}`);
+    setSyncStatus(`云端刷新失败：${formatSyncError(error)}`);
   }
   rebuildWorkingRows();
   populateFilters();
@@ -620,7 +648,7 @@ async function saveCreatorFromForm(formData) {
     render();
     const current = renderedOverview.find((item) => item["达人ID"] === creatorId);
     if (current) openDetail(current);
-    setSyncStatus(`未填写编辑人/口令，已暂存本机：${creatorId}`);
+    setSyncStatus(`未填写编辑人或口令，已暂存到当前浏览器：${creatorId}`);
     return;
   }
   try {
@@ -637,7 +665,7 @@ async function saveCreatorFromForm(formData) {
     render();
     const current = renderedOverview.find((item) => item["达人ID"] === creatorId);
     if (current) openDetail(current);
-    setSyncStatus(`云端保存失败，已暂存本机：${error.message}`);
+    setSyncStatus(`云端保存失败，已回退到本机暂存：${formatSyncError(error)}`);
   }
 }
 
@@ -649,14 +677,14 @@ function setupSyncPanel() {
       writePasscode: elements.coreWritePasscode.value,
     });
     persistSyncSettings(syncSettings);
-    setSyncStatus(syncSettings.editorName ? `已保存编辑身份：${syncSettings.editorName}` : "已保存本机设置。");
+    setSyncStatus(syncSettings.editorName ? `已保存编辑身份：${syncSettings.editorName}` : "已保存本机设置，可继续只读共享数据。");
   });
   elements.coreRefreshCloud.addEventListener("click", async () => {
     try {
       await refreshAfterMutation();
       setSyncStatus(`已刷新工作区 ${syncSettings.workspaceId} 的共享数据。`);
     } catch (error) {
-      setSyncStatus(`刷新失败：${error.message}`);
+      setSyncStatus(`刷新失败：${formatSyncError(error)}`);
     }
   });
   elements.coreClearSync.addEventListener("click", () => {
@@ -689,7 +717,7 @@ async function init() {
     await loadRemoteOverrides();
     setSyncStatus(`已连接工作区 ${syncSettings.workspaceId}，当前可读共享维护结果。`);
   } catch (error) {
-    setSyncStatus(`共享读取失败，当前仅使用本机暂存：${error.message}`);
+    setSyncStatus(`共享读取失败，当前仅使用本机暂存：${formatSyncError(error)}`);
   }
   rebuildWorkingRows();
 
