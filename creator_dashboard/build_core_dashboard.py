@@ -2,10 +2,16 @@ from __future__ import annotations
 
 import csv
 import json
+import os
 from datetime import datetime, timedelta
 from pathlib import Path
 
 from openpyxl import load_workbook
+
+try:
+    import tomllib  # type: ignore[attr-defined]
+except ModuleNotFoundError:  # pragma: no cover
+    tomllib = None
 
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -13,6 +19,8 @@ WORKBOOK_PATH = Path("/Users/apple/Desktop/达人多次合作监控看板_同步
 OUTPUT_JSON = BASE_DIR / "data" / "core_creator_dashboard.json"
 OUTPUT_CSV = BASE_DIR / "data" / "core_creator_overview.csv"
 OUTPUT_JS = BASE_DIR / "data" / "core_creator_dashboard.js"
+PIPELINE_STATE_PATH = Path("/Users/apple/Documents/Playground/tiktok_shop_sync/data/pipeline_state.json")
+AUTOMATION_TOML_PATH = Path(os.path.expanduser("~/.codex/automations/tiktok/automation.toml"))
 
 OVERVIEW_HEADERS = [
     "达人ID",
@@ -41,30 +49,7 @@ OVERVIEW_HEADERS = [
     "备注",
 ]
 
-FOCUS_HEADERS = [
-    "达人ID",
-    "达人名称",
-    "平台",
-    "粉丝量",
-    "达人分层(L0/L1/L2/L3)",
-    "达人类型",
-    "品牌标签",
-    "历史总GMV",
-    "90天GMV",
-    "最近合作日期",
-    "当前合作状态",
-    "近30天合作次数",
-    "平均间隔天数",
-    "距离上次发布天数",
-    "近30天是否出单(Y/N)",
-    "是否进入复投(Y/N)",
-    "是否超时未合作",
-    "优先级",
-    "下一步动作",
-    "负责人",
-    "截止日期",
-    "备注",
-]
+FOCUS_HEADERS = OVERVIEW_HEADERS.copy()
 
 RECORD_HEADERS = [
     "达人ID",
@@ -320,6 +305,81 @@ def compute_timeout(near30_video_gmv: float, latest_fee: float, recent_coop_date
     return "Y" if now_dt > deadline else "N"
 
 
+def load_pipeline_state() -> dict[str, object]:
+    if not PIPELINE_STATE_PATH.exists():
+        return {}
+    try:
+        return json.loads(PIPELINE_STATE_PATH.read_text(encoding="utf-8"))
+    except json.JSONDecodeError:
+        return {}
+
+
+def load_automation_status() -> dict[str, str]:
+    if not AUTOMATION_TOML_PATH.exists():
+        return {"status": "MISSING", "schedule": ""}
+    raw_text = AUTOMATION_TOML_PATH.read_text(encoding="utf-8")
+    if tomllib:
+        try:
+            data = tomllib.loads(raw_text)
+        except tomllib.TOMLDecodeError:
+            return {"status": "BROKEN", "schedule": ""}
+    else:
+        data: dict[str, str] = {}
+        for line in raw_text.splitlines():
+            if "=" not in line:
+                continue
+            key, value = line.split("=", 1)
+            data[key.strip()] = value.strip().strip('"')
+    return {
+        "status": normalize_text(data.get("status")) or "UNKNOWN",
+        "schedule": normalize_text(data.get("rrule")),
+    }
+
+
+def build_sync_health_metrics() -> list[dict[str, object]]:
+    pipeline_state = load_pipeline_state()
+    stores = pipeline_state.get("stores", {}) if isinstance(pipeline_state, dict) else {}
+    run = pipeline_state.get("last_pipeline_run", {}) if isinstance(pipeline_state, dict) else {}
+    automation = load_automation_status()
+    metrics: list[dict[str, object]] = [
+        {
+            "指标": "自动化任务状态",
+            "数值": automation.get("status", "UNKNOWN"),
+            "说明": "当前正式日更任务定义",
+            "": automation.get("schedule", ""),
+        },
+        {
+            "指标": "上次自动化运行",
+            "数值": normalize_text(run.get("run_at")) or "未记录",
+            "说明": "最近一次流水线运行日期",
+            "": "",
+        },
+        {
+            "指标": "当前待同步日期",
+            "数值": normalize_text(run.get("next_sync_date")) or "未记录",
+            "说明": "四店铺中最早待推进的增量日期",
+            "": "",
+        },
+        {
+            "指标": "店铺同步结果",
+            "数值": f"{normalize_text(run.get('success') or 0)} 成功 / {normalize_text(run.get('failed') or 0)} 失败",
+            "说明": "最近一次自动化四店铺结果",
+            "": "",
+        },
+    ]
+    for store_key in ("letme", "stypro", "sparco", "icyee"):
+        store = stores.get(store_key, {}) if isinstance(stores, dict) else {}
+        metrics.append(
+            {
+                "指标": f"{store_key.upper()}同步状态",
+                "数值": normalize_text(store.get("last_status") or store.get("last_mode")) or "未记录",
+                "说明": normalize_text(store.get("next_increment_date")) or "无待同步日期",
+                "": normalize_text(store.get("last_error")),
+            }
+        )
+    return metrics
+
+
 def build_brand_tags(
     key: str,
     fact_row: dict[str, object],
@@ -451,7 +511,7 @@ def build_payload() -> dict[str, object]:
         "missingFocusCount": len(missing_focus_ids),
     }
 
-    metrics = rows_as_dicts(workbook["运营驾驶舱"], start_row=2)
+    metrics = rows_as_dicts(workbook["运营驾驶舱"], start_row=2) + build_sync_health_metrics()
 
     return {
         "generatedAt": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),

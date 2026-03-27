@@ -364,7 +364,7 @@ body::before {
 table {
   width: 100%;
   border-collapse: collapse;
-  min-width: 980px;
+  min-width: 2400px;
 }
 
 th,
@@ -406,7 +406,8 @@ tbody tr:hover {
 .creator-name {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 4px;
+  min-width: 160px;
 }
 
 .creator-name strong {
@@ -460,6 +461,29 @@ tbody tr:hover {
 .pill.is-muted {
   background: rgba(31, 36, 48, 0.08);
   color: var(--muted);
+}
+
+.remark-toggle {
+  min-width: 180px;
+}
+
+.remark-toggle summary {
+  cursor: pointer;
+  color: var(--secondary);
+  font-weight: 700;
+  list-style: none;
+}
+
+.remark-toggle summary::-webkit-details-marker {
+  display: none;
+}
+
+.remark-toggle__content {
+  margin-top: 8px;
+  line-height: 1.6;
+  color: var(--muted);
+  white-space: normal;
+  max-width: 320px;
 }
 
 .tag-cards {

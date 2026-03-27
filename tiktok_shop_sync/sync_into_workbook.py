@@ -18,6 +18,7 @@ WORKBOOK_PATH = Path("/Users/apple/Desktop/达人多次合作监控看板_同步
 VIDEO_CSV = Path("/Users/apple/Documents/Playground/tiktok_shop_sync/data/normalized/video_performance.csv")
 CREATOR_CSV = Path("/Users/apple/Documents/Playground/tiktok_shop_sync/data/normalized/creator_performance.csv")
 CREATOR_HISTORY_CSV = Path("/Users/apple/Documents/Playground/tiktok_shop_sync/data/normalized/creator_history_gmv.csv")
+STATE_PATH = Path("/Users/apple/Documents/Playground/tiktok_shop_sync/data/pipeline_state.json")
 COOP_XLSX = Path(
     "/Users/apple/Library/Containers/com.tencent.xinWeChat/Data/Documents/xwechat_files/"
     "wxid_2514345143114_b48d/temp/drag/cooperation_export_1774577590040.xlsx"
@@ -230,6 +231,15 @@ def load_csv(path: Path) -> list[dict[str, str]]:
         return []
     with path.open("r", encoding="utf-8-sig", newline="") as handle:
         return list(csv.DictReader(handle))
+
+
+def load_pipeline_state() -> dict:
+    if not STATE_PATH.exists():
+        return {}
+    try:
+        return json.loads(STATE_PATH.read_text(encoding="utf-8"))
+    except json.JSONDecodeError:
+        return {}
 
 
 def write_sheet_rows(sheet, headers: list[str], rows: list[dict[str, object]], start_row: int = 2) -> None:
@@ -1061,6 +1071,30 @@ def update_metrics_sheet(workbook) -> None:
 
 def append_log(workbook, status: str, message: str, video_rows: int, creator_rows: int) -> None:
     sheet = workbook["同步日志"]
+    pipeline_state = load_pipeline_state()
+    last_pipeline_run = pipeline_state.get("last_pipeline_run", {})
+    stores = pipeline_state.get("stores", {})
+    store_summary = []
+    for key in ("letme", "stypro", "sparco", "icyee"):
+        store_state = stores.get(key, {})
+        status_text = normalize_text(store_state.get("last_status") or store_state.get("last_mode"))
+        next_date = normalize_text(store_state.get("next_increment_date"))
+        error_text = normalize_text(store_state.get("last_error"))
+        summary = f"{key}:{status_text or '-'}"
+        if next_date:
+            summary += f"/next={next_date}"
+        if error_text:
+            summary += f"/err={error_text}"
+        store_summary.append(summary)
+    summary_text = " | ".join(store_summary)
+    pipeline_text = ""
+    if last_pipeline_run:
+        pipeline_text = (
+            f"run={normalize_text(last_pipeline_run.get('run_at'))}, "
+            f"success={normalize_text(last_pipeline_run.get('success'))}, "
+            f"failed={normalize_text(last_pipeline_run.get('failed'))}, "
+            f"next={normalize_text(last_pipeline_run.get('next_sync_date'))}"
+        )
     next_row = sheet.max_row + 1
     sheet.cell(row=next_row, column=1, value=datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
     sheet.cell(row=next_row, column=2, value="手工导入同步")
@@ -1072,7 +1106,7 @@ def append_log(workbook, status: str, message: str, video_rows: int, creator_row
     sheet.cell(row=next_row, column=8, value=video_rows)
     sheet.cell(row=next_row, column=9, value=creator_rows)
     sheet.cell(row=next_row, column=10, value=status)
-    sheet.cell(row=next_row, column=11, value=message)
+    sheet.cell(row=next_row, column=11, value=" | ".join(part for part in [message, pipeline_text, summary_text] if part))
 
 
 def main() -> None:

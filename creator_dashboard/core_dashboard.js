@@ -17,6 +17,33 @@ const CORE_EDIT_FIELDS = [
   { label: "备注", remoteKey: "core_备注", type: "textarea", placeholder: "补充运营判断和人工备注" },
 ];
 
+const TABLE_COLUMNS = [
+  "达人名称",
+  "达人ID",
+  "平台",
+  "粉丝量",
+  "达人分层(L0/L1/L2/L3)",
+  "达人类型",
+  "品牌标签",
+  "历史总GMV",
+  "90天GMV",
+  "近30天发布视频gmv",
+  "最近合作日期",
+  "当前合作状态",
+  "近30天合作次数",
+  "平均间隔天数",
+  "距离上次发布天数",
+  "近30天是否出单(Y/N)",
+  "是否进入复投(Y/N)",
+  "是否超时未合作",
+  "平均交付时间",
+  "优先级",
+  "下一步动作",
+  "负责人",
+  "截止日期",
+  "备注",
+];
+
 const state = {
   search: "",
   level: "全部",
@@ -46,8 +73,10 @@ const elements = {
   brandFilter: document.querySelector("#brand-filter"),
   resultTitle: document.querySelector("#result-title"),
   resultSubtitle: document.querySelector("#result-subtitle"),
+  overviewHead: document.querySelector("#overview-head"),
   overviewBody: document.querySelector("#overview-body"),
   overviewPagination: document.querySelector("#overview-pagination"),
+  focusHead: document.querySelector("#focus-head"),
   focusBody: document.querySelector("#focus-body"),
   focusPagination: document.querySelector("#focus-pagination"),
   recordBody: document.querySelector("#record-body"),
@@ -402,10 +431,11 @@ function renderOverview() {
   const rows = filteredOverview();
   elements.resultTitle.textContent = `${rows.length} 个 Creator 达人`;
   elements.resultSubtitle.textContent = `展示全量唯一 Creator 聚合结果，重点池单独维护为 189 人`;
+  renderTableHead(elements.overviewHead);
   const pageData = paginateRows(rows, state.overviewPage, OVERVIEW_PAGE_SIZE);
   state.overviewPage = pageData.page;
   if (!rows.length) {
-    elements.overviewBody.innerHTML = '<tr><td colspan="11"><div class="empty-state">当前筛选下没有匹配达人。</div></td></tr>';
+    elements.overviewBody.innerHTML = `<tr><td colspan="${TABLE_COLUMNS.length + 1}"><div class="empty-state">当前筛选下没有匹配达人。</div></td></tr>`;
     renderPagination(elements.overviewPagination, pageData, (page) => {
       state.overviewPage = page;
       render();
@@ -413,29 +443,7 @@ function renderOverview() {
     return;
   }
   elements.overviewBody.innerHTML = pageData.rows
-    .map((row) => {
-      const url = getProfileUrl(row);
-      return `
-        <tr>
-          <td>
-            <div class="creator-name">
-              <a class="creator-link" href="${escapeHtml(url)}" target="_blank" rel="noreferrer noopener">${escapeHtml(row["达人名称"])}</a>
-              <span>@${escapeHtml(row["达人ID"])}</span>
-            </div>
-          </td>
-          <td>${splitMultiValue(row["品牌标签"]).map((item) => `<span class="pill is-warm">${escapeHtml(item)}</span>`).join("") || "-"}</td>
-          <td><span class="pill">${escapeHtml(row["达人分层(L0/L1/L2/L3)"])}</span></td>
-          <td><span class="pill ${row["当前合作状态"] === "在合作" ? "is-warm" : "is-muted"}">${escapeHtml(row["当前合作状态"])}</span></td>
-          <td>${escapeHtml(formatNumber(row["历史总GMV"]))}</td>
-          <td>${escapeHtml(formatNumber(row["90天GMV"]))}</td>
-          <td><span class="pill ${row["优先级"] === "高" ? "is-warm" : row["优先级"] === "中" ? "" : "is-muted"}">${escapeHtml(row["优先级"])}</span></td>
-          <td>${escapeHtml(row["是否进入复投(Y/N)"])}</td>
-          <td>${escapeHtml(row["下一步动作"])}</td>
-          <td>${escapeHtml(row["备注"])}</td>
-          <td><button class="ghost-button table-action" type="button" data-edit-id="${escapeHtml(row["达人ID"])}">编辑</button></td>
-        </tr>
-      `;
-    })
+    .map((row) => renderTableRow(row, "edit"))
     .join("");
   elements.overviewBody.querySelectorAll("[data-edit-id]").forEach((button) => {
     button.addEventListener("click", () => {
@@ -451,10 +459,11 @@ function renderOverview() {
 
 function renderFocus() {
   const rows = filteredFocus();
+  renderTableHead(elements.focusHead);
   const pageData = paginateRows(rows, state.focusPage, FOCUS_PAGE_SIZE);
   state.focusPage = pageData.page;
   if (!rows.length) {
-    elements.focusBody.innerHTML = '<tr><td colspan="9"><div class="empty-state">当前筛选下没有匹配的重点达人。</div></td></tr>';
+    elements.focusBody.innerHTML = `<tr><td colspan="${TABLE_COLUMNS.length + 1}"><div class="empty-state">当前筛选下没有匹配的重点达人。</div></td></tr>`;
     renderPagination(elements.focusPagination, pageData, (page) => {
       state.focusPage = page;
       render();
@@ -462,26 +471,7 @@ function renderFocus() {
     return;
   }
   elements.focusBody.innerHTML = pageData.rows
-    .map(
-      (row) => `
-      <tr>
-        <td>
-          <div class="creator-name">
-            <a class="creator-link" href="${escapeHtml(getProfileUrl(row))}" target="_blank" rel="noreferrer noopener">${escapeHtml(row["达人名称"])}</a>
-            <span>@${escapeHtml(row["达人ID"])}</span>
-          </div>
-        </td>
-        <td>${splitMultiValue(row["品牌标签"]).map((item) => `<span class="pill is-warm">${escapeHtml(item)}</span>`).join("") || "-"}</td>
-        <td><span class="pill">${escapeHtml(row["达人分层(L0/L1/L2/L3)"])}</span></td>
-        <td>${escapeHtml(row["平台"])}</td>
-        <td>${escapeHtml(formatNumber(row["历史总GMV"]))}</td>
-        <td>${escapeHtml(row["当前合作状态"])}</td>
-        <td><span class="pill ${row["优先级"] === "高" ? "is-warm" : row["优先级"] === "中" ? "" : "is-muted"}">${escapeHtml(row["优先级"])}</span></td>
-        <td>${escapeHtml(row["下一步动作"])}</td>
-        <td><button class="ghost-button table-action" type="button" data-focus-edit-id="${escapeHtml(row["达人ID"])}">编辑</button></td>
-      </tr>
-    `
-    )
+    .map((row) => renderTableRow(row, "focus-edit"))
     .join("");
   elements.focusBody.querySelectorAll("[data-focus-edit-id]").forEach((button) => {
     button.addEventListener("click", () => {
@@ -531,6 +521,73 @@ function renderMetrics() {
       `
     )
     .join("");
+}
+
+function renderTableHead(node) {
+  if (!node) return;
+  node.innerHTML = `
+    <tr>
+      ${TABLE_COLUMNS.map((column) => `<th>${escapeHtml(column)}</th>`).join("")}
+      <th>操作</th>
+    </tr>
+  `;
+}
+
+function renderCollapsedRemark(value) {
+  const text = String(value || "").trim();
+  if (!text) return "-";
+  const summary = text.length > 18 ? `${text.slice(0, 18)}...` : text;
+  return `
+    <details class="remark-toggle">
+      <summary>${escapeHtml(summary)}</summary>
+      <div class="remark-toggle__content">${escapeHtml(text)}</div>
+    </details>
+  `;
+}
+
+function renderValueCell(row, column) {
+  const value = row[column];
+  if (column === "达人名称") {
+    const url = getProfileUrl(row);
+    return `
+      <div class="creator-name">
+        <a class="creator-link" href="${escapeHtml(url)}" target="_blank" rel="noreferrer noopener">${escapeHtml(value)}</a>
+      </div>
+    `;
+  }
+  if (column === "品牌标签") {
+    return splitMultiValue(value).map((item) => `<span class="pill is-warm">${escapeHtml(item)}</span>`).join("") || "-";
+  }
+  if (column === "达人分层(L0/L1/L2/L3)") {
+    return value ? `<span class="pill">${escapeHtml(value)}</span>` : "-";
+  }
+  if (column === "当前合作状态") {
+    return value
+      ? `<span class="pill ${value === "在合作" ? "is-warm" : "is-muted"}">${escapeHtml(value)}</span>`
+      : "-";
+  }
+  if (column === "优先级") {
+    return value
+      ? `<span class="pill ${value === "高" ? "is-warm" : value === "中" ? "" : "is-muted"}">${escapeHtml(value)}</span>`
+      : "-";
+  }
+  if (["历史总GMV", "90天GMV", "近30天发布视频gmv"].includes(column)) {
+    return escapeHtml(formatNumber(value));
+  }
+  if (column === "备注") {
+    return renderCollapsedRemark(value);
+  }
+  return escapeHtml(value || "-");
+}
+
+function renderTableRow(row, mode) {
+  const actionAttr = mode === "focus-edit" ? "data-focus-edit-id" : "data-edit-id";
+  return `
+    <tr>
+      ${TABLE_COLUMNS.map((column) => `<td>${renderValueCell(row, column)}</td>`).join("")}
+      <td><button class="ghost-button table-action" type="button" ${actionAttr}="${escapeHtml(row["达人ID"])}">编辑</button></td>
+    </tr>
+  `;
 }
 
 function render() {
@@ -852,6 +909,6 @@ async function init() {
 
 init().catch((error) => {
   elements.generatedAt.textContent = "数据加载失败";
-  elements.overviewBody.innerHTML = '<tr><td colspan="10"><div class="empty-state">核心看板加载失败，请稍后重试。</div></td></tr>';
+  elements.overviewBody.innerHTML = `<tr><td colspan="${TABLE_COLUMNS.length + 1}"><div class="empty-state">核心看板加载失败，请稍后重试。</div></td></tr>`;
   console.error(error);
 });
