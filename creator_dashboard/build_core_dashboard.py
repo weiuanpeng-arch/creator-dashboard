@@ -127,7 +127,7 @@ def build_payload() -> dict[str, object]:
     ]
     record_rows = [
         {header: row.get(header, "") for header in RECORD_HEADERS}
-        for row in read_sheet_rows(workbook["合作记录明细"], start_row=3, key_field="达人ID")
+        for row in read_sheet_rows(workbook["合作记录明细"], start_row=2, key_field="达人ID")
     ]
     metrics = read_metrics(workbook["运营驾驶舱"])
 

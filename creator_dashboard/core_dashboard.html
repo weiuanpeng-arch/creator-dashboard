@@ -71,6 +71,27 @@
             </div>
             <div id="assumption-list" class="assumption-list"></div>
           </section>
+
+          <section class="panel">
+            <div class="panel__header">
+              <p class="panel__eyebrow">Sync</p>
+              <h2>人工维护设置</h2>
+            </div>
+            <label class="field">
+              <span>编辑人</span>
+              <input id="core-editor-name" type="text" placeholder="例如：Sherry / Tim" />
+            </label>
+            <label class="field">
+              <span>写入口令</span>
+              <input id="core-write-passcode" type="password" placeholder="团队共享写入口令" />
+            </label>
+            <div class="button-row core-sync-actions">
+              <button class="ghost-button" id="core-save-sync" type="button">保存设置</button>
+              <button class="ghost-button" id="core-refresh-cloud" type="button">刷新云端</button>
+              <button class="ghost-button" id="core-clear-sync" type="button">清空本机</button>
+            </div>
+            <p id="core-sync-status" class="editor-meta">默认读取共享云端数据；填写编辑人和口令后可保存人工维护字段。</p>
+          </section>
         </aside>
 
         <section class="content">
@@ -105,6 +126,7 @@
                       <th>复投</th>
                       <th>下一步动作</th>
                       <th>备注</th>
+                      <th>操作</th>
                     </tr>
                   </thead>
                   <tbody id="overview-body"></tbody>
@@ -178,6 +200,20 @@
         </section>
       </main>
     </div>
+
+    <dialog id="core-detail-modal" class="detail-modal">
+      <div class="detail-modal__content">
+        <div class="detail-modal__header">
+          <div>
+            <p class="panel__eyebrow">Core Creator Detail</p>
+            <h2 id="core-detail-title"></h2>
+            <p id="core-detail-subtitle" class="subtle"></p>
+          </div>
+          <button class="ghost-button" id="core-close-modal" type="button">关闭</button>
+        </div>
+        <div id="core-detail-body" class="detail-grid"></div>
+      </div>
+    </dialog>
 
     <script src="./data/core_creator_dashboard.js"></script>
     <script src="./core_dashboard.js" type="module"></script>
