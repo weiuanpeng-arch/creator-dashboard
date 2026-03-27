@@ -182,16 +182,25 @@ def parse_date(value: object) -> datetime | None:
     text = normalize_text(value)
     if not text:
         return None
-    for fmt in (
-        "%Y-%m-%d %H:%M:%S",
-        "%Y-%m-%d",
-        "%Y/%m/%d",
-        "%Y/%m/%d %H:%M:%S",
-    ):
-        try:
-            return datetime.strptime(text[:19], fmt)
-        except ValueError:
+    candidates = [text, text[:19], text[:16], text[:10]]
+    for candidate in candidates:
+        if not candidate:
             continue
+        for fmt in (
+            "%Y-%m-%d %H:%M:%S",
+            "%Y-%m-%d %H:%M",
+            "%Y-%m-%d",
+            "%Y/%m/%d %H:%M:%S",
+            "%Y/%m/%d %H:%M",
+            "%Y/%m/%d",
+            "%m/%d/%Y %H:%M:%S",
+            "%m/%d/%Y %H:%M",
+            "%m/%d/%Y",
+        ):
+            try:
+                return datetime.strptime(candidate, fmt)
+            except ValueError:
+                continue
     return None
 
 
