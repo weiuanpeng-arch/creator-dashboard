@@ -3,6 +3,7 @@ from __future__ import annotations
 import csv
 import json
 import os
+import re
 from datetime import datetime, timedelta
 from pathlib import Path
 
@@ -22,6 +23,7 @@ OUTPUT_JS = BASE_DIR / "data" / "core_creator_dashboard.js"
 CREATOR_POOL_JSON = BASE_DIR / "data" / "creator_pool.json"
 PIPELINE_STATE_PATH = Path("/Users/apple/Documents/Playground/tiktok_shop_sync/data/pipeline_state.json")
 AUTOMATION_TOML_PATH = Path(os.path.expanduser("~/.codex/automations/tiktok/automation.toml"))
+LEVEL_SHEET_PATH = Path("/Users/apple/Downloads/达人等级底表/达人等级底表.xlsx")
 
 OVERVIEW_HEADERS = [
     "达人ID",
@@ -105,6 +107,11 @@ def normalize_int_string(value: object) -> str:
     if abs(num - round(num)) < 1e-9:
         return str(int(round(num)))
     return normalize_text(value)
+
+
+def normalize_handle(value: object) -> str:
+    text = normalize_text(value).lower().lstrip("@")
+    return re.sub(r"[^a-z0-9._]+", "", text)
 
 
 def parse_date(value: object) -> datetime | None:
@@ -239,6 +246,22 @@ def build_focus_seed_rows(workbook) -> list[dict[str, object]]:
         if normalize_text(record.get("达人ID")):
             rows.append(record)
     return rows
+
+
+def load_level_mapping() -> dict[str, str]:
+    if not LEVEL_SHEET_PATH.exists():
+        return {}
+    workbook = load_workbook(LEVEL_SHEET_PATH, read_only=True, data_only=True)
+    sheet = workbook[workbook.sheetnames[0]]
+    rows = rows_as_dicts(sheet, start_row=2)
+    mapping: dict[str, str] = {}
+    for row in rows:
+        level = normalize_text(row.get("level"))
+        creator_ref = normalize_text(row.get("sparco"))
+        key = normalize_handle(creator_ref)
+        if key and level:
+            mapping[key] = level
+    return mapping
 
 
 def build_raw_creator_meta(workbook) -> tuple[dict[str, dict[str, object]], set[str]]:
@@ -421,6 +444,7 @@ def build_row(
     mapping_row: dict[str, object],
     focus_seed: dict[str, object] | None,
     brand_tags: str,
+    level_mapping: dict[str, str],
 ) -> dict[str, object]:
     creator_id = (
         normalize_text((mapping_row or {}).get("现有达人ID"))
@@ -434,6 +458,12 @@ def build_row(
         or normalize_text(fact_row.get("达人名称"))
         or normalize_text((meta_row or {}).get("达人名称"))
         or creator_id
+    )
+    level = (
+        normalize_text((focus_seed or {}).get("达人分层(L0/L1/L2/L3)"))
+        or level_mapping.get(normalize_handle(creator_id))
+        or level_mapping.get(normalize_handle(creator_name))
+        or level_mapping.get(normalize_handle(key))
     )
     history_gmv = normalize_number(fact_row.get("累计GMV")) or normalize_number((focus_seed or {}).get("历史总GMV"))
     gm90 = normalize_number(fact_row.get("近90天GMV")) or normalize_number((focus_seed or {}).get("90天GMV"))
@@ -457,7 +487,7 @@ def build_row(
         "达人名称": creator_name,
         "平台": normalize_text((focus_seed or {}).get("平台")) or "TikTok",
         "粉丝量": normalize_text((focus_seed or {}).get("粉丝量")) or normalize_text((meta_row or {}).get("Affiliate followers")),
-        "达人分层(L0/L1/L2/L3)": normalize_text((focus_seed or {}).get("达人分层(L0/L1/L2/L3)")),
+        "达人分层(L0/L1/L2/L3)": level,
         "达人类型": normalize_text((focus_seed or {}).get("达人类型")),
         "品牌标签": brand_tags,
         "历史总GMV": round(history_gmv, 2),
@@ -485,6 +515,7 @@ def build_row(
 
 def build_payload() -> dict[str, object]:
     workbook = load_workbook(WORKBOOK_PATH, read_only=True, data_only=True)
+    level_mapping = load_level_mapping()
     focus_seed_rows = build_focus_seed_rows(workbook)
     creator_mapping_by_source, creator_mapping_by_existing = build_creator_mapping(workbook)
     creator_meta_by_key, valid_keys = build_raw_creator_meta(workbook)
@@ -498,7 +529,7 @@ def build_payload() -> dict[str, object]:
         meta_row = creator_meta_by_key.get(key, {})
         mapping_row = creator_mapping_by_source.get(key, {})
         brand_tags = build_brand_tags(key, fact_row, video_brands_by_key, brands_by_pid)
-        overview_rows.append(build_row(key, fact_row, meta_row, mapping_row, None, brand_tags))
+        overview_rows.append(build_row(key, fact_row, meta_row, mapping_row, None, brand_tags, level_mapping))
 
     focus_rows: list[dict[str, object]] = []
     missing_focus_ids: list[str] = []
@@ -510,7 +541,7 @@ def build_payload() -> dict[str, object]:
         fact_row = fact_by_key.get(key, {})
         meta_row = creator_meta_by_key.get(key, {})
         brand_tags = build_brand_tags(key, fact_row, video_brands_by_key, brands_by_pid)
-        focus_row = build_row(key, fact_row, meta_row, mapping_row, seed, brand_tags)
+        focus_row = build_row(key, fact_row, meta_row, mapping_row, seed, brand_tags, level_mapping)
         if creator_id not in overview_by_id:
             missing_focus_ids.append(creator_id)
         focus_rows.append(focus_row)
