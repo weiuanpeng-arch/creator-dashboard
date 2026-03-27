@@ -28,6 +28,15 @@ const MODULES = {
   },
 };
 
+class ExportSkipError extends Error {
+  constructor(reason, detail = "") {
+    super(`__SKIP__:${reason}${detail ? `:${detail}` : ""}`);
+    this.name = "ExportSkipError";
+    this.reason = reason;
+    this.detail = detail;
+  }
+}
+
 function formatRangeToken(value) {
   const [month, day, year] = value.split("/");
   return `${year}${month}${day}`;
@@ -88,6 +97,48 @@ function buildVideoCreateBody(appliedRange) {
   };
 }
 
+async function describePageState(page) {
+  const snapshot = await page.evaluate(() => {
+    const bodyText = (document.body?.innerText || "").replace(/\s+/g, " ").trim();
+    const visibleButtons = [...document.querySelectorAll("button")]
+      .map((node) => (node.textContent || "").replace(/\s+/g, " ").trim())
+      .filter(Boolean)
+      .slice(0, 12);
+    return {
+      url: location.href,
+      bodyText: bodyText.slice(0, 400),
+      visibleButtons,
+    };
+  }).catch(() => ({ url: page.url(), bodyText: "", visibleButtons: [] }));
+  return {
+    ...snapshot,
+    bodyLower: (snapshot.bodyText || "").toLowerCase(),
+  };
+}
+
+function classifyPageState(state, pageLabel) {
+  const text = state.bodyLower || "";
+  const url = (state.url || "").toLowerCase();
+  const loginHints = ["login", "log in", "sign in", "session expired", "expired"];
+  const emptyHints = ["no data", "no result", "no results", "empty", "no creator", "no video"];
+  if (url.includes("login") || loginHints.some((hint) => text.includes(hint))) {
+    return new ExportSkipError("not_logged_in", `${pageLabel} page requires login`);
+  }
+  if (emptyHints.some((hint) => text.includes(hint))) {
+    return new ExportSkipError("no_results", `${pageLabel} page returned no results`);
+  }
+  return null;
+}
+
+async function ensurePageReady(page, pageLabel) {
+  const state = await describePageState(page);
+  const classified = classifyPageState(state, pageLabel);
+  if (classified) {
+    throw classified;
+  }
+  return state;
+}
+
 async function openPerformancePage(page) {
   if (!page.url().includes("affiliate-id.tokopedia.com/insights/transaction-analysis")) {
     await page.goto("https://affiliate-id.tokopedia.com/insights/transaction-analysis", {
@@ -95,10 +146,14 @@ async function openPerformancePage(page) {
       timeout: 60000,
     }).catch(() => {});
   }
-  await page.waitForFunction(
+  const ready = await page.waitForFunction(
     () => document.body.innerText.includes("Videos") && document.body.innerText.includes("Export"),
     { timeout: 30000 },
-  ).catch(() => {});
+  ).then(() => true).catch(() => false);
+  if (!ready) {
+    const state = await ensurePageReady(page, "Performance");
+    throw new Error(`performance page not ready: ${state.url} :: ${state.bodyText}`);
+  }
   await page.waitForTimeout(4000);
 }
 
@@ -226,6 +281,7 @@ async function setDateRange(page, startDate, endDate, pickerIndex = 1) {
 }
 
 async function getVisibleExportButton(page) {
+  await ensurePageReady(page, "Performance");
   const exports = page.locator('button:visible').filter({ hasText: "Export" });
   const count = await exports.count();
   for (let index = 0; index < count; index += 1) {
@@ -234,7 +290,8 @@ async function getVisibleExportButton(page) {
       return exports.nth(index);
     }
   }
-  throw new Error("no visible export button found");
+  const state = await ensurePageReady(page, "Performance");
+  throw new Error(`no visible export button found: ${state.url} :: ${state.bodyText}`);
 }
 
 function pickTask(tasks, prefix, appliedRange) {
@@ -290,6 +347,7 @@ async function fetchJsonWithCookies(context, url, method, body) {
 async function exportModule(page, context, storeKey, moduleKey, appliedRange) {
   const moduleConfig = MODULES[moduleKey];
   await selectTab(page, moduleConfig.tabId, moduleConfig.tabText, moduleConfig.waitText);
+  await ensurePageReady(page, `${moduleConfig.tabText} Performance`);
 
   const listResponses = [];
   const createResponses = [];
@@ -414,6 +472,7 @@ async function main() {
     await openPerformancePage(page);
     // Details 区域上方的第二组日期控件才控制 Videos 导出区间。
     const appliedRange = await setDateRange(page, startDate, endDate, 1);
+    await ensurePageReady(page, "Performance");
     const modules = mode === "both" ? ["creator", "video"] : [mode];
     const exports = [];
     for (const moduleKey of modules) {

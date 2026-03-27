@@ -13,6 +13,15 @@ const configs = {
 
 const CREATOR_ANALYSIS_URL = "https://affiliate-id.tokopedia.com/data/creator-analysis?platform_data_source=shop";
 
+class ExportSkipError extends Error {
+  constructor(reason, detail = "") {
+    super(`__SKIP__:${reason}${detail ? `:${detail}` : ""}`);
+    this.name = "ExportSkipError";
+    this.reason = reason;
+    this.detail = detail;
+  }
+}
+
 function normalizeInputDate(value) {
   if (!value) {
     return "";
@@ -39,6 +48,48 @@ function addOneDay(value) {
   return date.toISOString().slice(0, 10);
 }
 
+async function describePageState(page) {
+  const snapshot = await page.evaluate(() => {
+    const bodyText = (document.body?.innerText || "").replace(/\s+/g, " ").trim();
+    const visibleButtons = [...document.querySelectorAll("button")]
+      .map((node) => (node.textContent || "").replace(/\s+/g, " ").trim())
+      .filter(Boolean)
+      .slice(0, 12);
+    return {
+      url: location.href,
+      bodyText: bodyText.slice(0, 400),
+      visibleButtons,
+    };
+  }).catch(() => ({ url: page.url(), bodyText: "", visibleButtons: [] }));
+  return {
+    ...snapshot,
+    bodyLower: (snapshot.bodyText || "").toLowerCase(),
+  };
+}
+
+function classifyPageState(state, pageLabel) {
+  const text = state.bodyLower || "";
+  const url = (state.url || "").toLowerCase();
+  const loginHints = ["login", "log in", "sign in", "session expired", "expired"];
+  const emptyHints = ["no data", "no result", "no results", "empty", "no creator", "creator not found"];
+  if (url.includes("login") || loginHints.some((hint) => text.includes(hint))) {
+    return new ExportSkipError("not_logged_in", `${pageLabel} page requires login`);
+  }
+  if (emptyHints.some((hint) => text.includes(hint))) {
+    return new ExportSkipError("no_results", `${pageLabel} page returned no results`);
+  }
+  return null;
+}
+
+async function ensurePageReady(page, pageLabel) {
+  const state = await describePageState(page);
+  const classified = classifyPageState(state, pageLabel);
+  if (classified) {
+    throw classified;
+  }
+  return state;
+}
+
 async function readAppliedRange(page) {
   return page.evaluate(() => {
     const inputs = [...document.querySelectorAll('input[placeholder="Start date"], input[placeholder="End date"]')];
@@ -48,13 +99,17 @@ async function readAppliedRange(page) {
 }
 
 async function waitForCreatorAnalysis(page) {
-  await page.waitForFunction(
+  const ready = await page.waitForFunction(
     () =>
       document.body.innerText.includes("Creator") &&
       document.body.innerText.includes("Export") &&
       document.querySelectorAll('input[placeholder="Start date"], input[placeholder="End date"]').length >= 2,
     { timeout: 45000 },
-  );
+  ).then(() => true).catch(() => false);
+  if (!ready) {
+    const state = await ensurePageReady(page, "Creator Analysis");
+    throw new Error(`creator analysis page not ready: ${state.url} :: ${state.bodyText}`);
+  }
   await page.waitForTimeout(2000);
 }
 
@@ -232,6 +287,7 @@ async function buildCreatorTaskListUrl(page) {
 }
 
 async function exportCreatorReport(page, context, storeKey) {
+  await ensurePageReady(page, "Creator Analysis");
   const responses = [];
   page.on("response", async (response) => {
     const url = response.url();
@@ -252,7 +308,8 @@ async function exportCreatorReport(page, context, storeKey) {
   const exportButtons = page.locator("button").filter({ hasText: "Export" });
   const count = await exportButtons.count();
   if (count < 2) {
-    throw new Error("creator analysis export button not found");
+    const state = await ensurePageReady(page, "Creator Analysis");
+    throw new Error(`creator analysis export button not found: ${state.url} :: ${state.bodyText}`);
   }
   await exportButtons.nth(1).click({ force: true });
   for (let attempt = 0; attempt < 20; attempt += 1) {
@@ -308,6 +365,7 @@ async function exportCreatorReport(page, context, storeKey) {
 }
 
 async function captureCreatorExportUrl(page) {
+  await ensurePageReady(page, "Creator Analysis");
   const urls = [];
   const handler = (request) => {
     const url = request.url();
@@ -320,7 +378,8 @@ async function captureCreatorExportUrl(page) {
     const exportButtons = page.locator("button").filter({ hasText: "Export" });
     const count = await exportButtons.count();
     if (count < 2) {
-      throw new Error("creator analysis export button not found");
+      const state = await ensurePageReady(page, "Creator Analysis");
+      throw new Error(`creator analysis export button not found: ${state.url} :: ${state.bodyText}`);
     }
     await exportButtons.nth(1).click({ force: true });
     for (let attempt = 0; attempt < 10; attempt += 1) {
@@ -339,6 +398,7 @@ async function captureCreatorExportUrl(page) {
 }
 
 async function exportCreatorReportDirect(page, context, storeKey, startDate, endDate) {
+  await ensurePageReady(page, "Creator Analysis");
   const exportUrl = await captureCreatorExportUrl(page);
   const taskListUrl = await buildCreatorTaskListUrl(page);
   const exclusiveEnd = addOneDay(normalizeInputDate(endDate));
@@ -431,6 +491,7 @@ async function main() {
     await page.bringToFront();
     await waitForCreatorAnalysis(page);
     await page.waitForTimeout(5000);
+    await ensurePageReady(page, "Creator Analysis");
     const initialRange = await readAppliedRange(page);
     const result =
       startDate && endDate

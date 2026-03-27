@@ -120,11 +120,24 @@ def summarize_error(error: Exception) -> str:
     return text or error.__class__.__name__
 
 
+def parse_skip_message(message: str) -> tuple[str, str] | None:
+    marker = "__SKIP__:"
+    if marker not in message:
+        return None
+    payload = message.split(marker, 1)[1].strip()
+    first_line = payload.splitlines()[0].strip()
+    reason, _, detail = first_line.partition(":")
+    reason = reason.strip() or "unknown"
+    detail = detail.strip() or reason
+    return reason, detail
+
+
 def pipeline_summary(state: dict[str, Any]) -> dict[str, Any]:
     stores = state.get("stores", {})
     success = 0
     waiting = 0
     bootstrap = 0
+    skipped = 0
     failed = 0
     next_dates: list[str] = []
     failures: list[dict[str, str]] = []
@@ -136,6 +149,8 @@ def pipeline_summary(state: dict[str, Any]) -> dict[str, Any]:
             waiting += 1
         elif status == "bootstrap_required":
             bootstrap += 1
+        elif status == "skipped":
+            skipped += 1
         elif status == "error":
             failed += 1
             failures.append(
@@ -151,6 +166,7 @@ def pipeline_summary(state: dict[str, Any]) -> dict[str, Any]:
         "success": success,
         "waiting": waiting,
         "bootstrap_required": bootstrap,
+        "skipped": skipped,
         "failed": failed,
         "next_sync_date": min(next_dates) if next_dates else "",
         "failures": failures,
@@ -292,6 +308,21 @@ def main() -> None:
             )
         except Exception as error:
             message = summarize_error(error)
+            skip_detail = parse_skip_message(message)
+            if skip_detail is not None:
+                skip_code, skip_reason = skip_detail
+                store_state.update(
+                    {
+                        "last_mode": effective_mode,
+                        "last_run_at": run_date,
+                        "last_status": "skipped",
+                        "last_error": skip_reason,
+                        "last_skip_code": skip_code,
+                        "last_requested_range": {"start": start_date, "end": end_date},
+                    }
+                )
+                print(f"[skip] {store_tag}: {skip_reason}")
+                continue
             store_state.update(
                 {
                     "last_mode": effective_mode,

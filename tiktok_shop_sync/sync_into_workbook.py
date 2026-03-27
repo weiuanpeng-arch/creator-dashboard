@@ -1092,6 +1092,7 @@ def append_log(workbook, status: str, message: str, video_rows: int, creator_row
         pipeline_text = (
             f"run={normalize_text(last_pipeline_run.get('run_at'))}, "
             f"success={normalize_text(last_pipeline_run.get('success'))}, "
+            f"skipped={normalize_text(last_pipeline_run.get('skipped'))}, "
             f"failed={normalize_text(last_pipeline_run.get('failed'))}, "
             f"next={normalize_text(last_pipeline_run.get('next_sync_date'))}"
         )

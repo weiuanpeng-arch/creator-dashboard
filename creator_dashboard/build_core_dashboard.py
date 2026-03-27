@@ -19,6 +19,7 @@ WORKBOOK_PATH = Path("/Users/apple/Desktop/达人多次合作监控看板_同步
 OUTPUT_JSON = BASE_DIR / "data" / "core_creator_dashboard.json"
 OUTPUT_CSV = BASE_DIR / "data" / "core_creator_overview.csv"
 OUTPUT_JS = BASE_DIR / "data" / "core_creator_dashboard.js"
+CREATOR_POOL_JSON = BASE_DIR / "data" / "creator_pool.json"
 PIPELINE_STATE_PATH = Path("/Users/apple/Documents/Playground/tiktok_shop_sync/data/pipeline_state.json")
 AUTOMATION_TOML_PATH = Path(os.path.expanduser("~/.codex/automations/tiktok/automation.toml"))
 
@@ -212,10 +213,28 @@ def build_creator_mapping(workbook) -> tuple[dict[str, dict[str, object]], dict[
 
 
 def build_focus_seed_rows(workbook) -> list[dict[str, object]]:
+    if CREATOR_POOL_JSON.exists():
+        payload = json.loads(CREATOR_POOL_JSON.read_text(encoding="utf-8"))
+        rows: list[dict[str, object]] = []
+        for creator in payload.get("creators", []):
+            rows.append(
+                {
+                    "达人ID": normalize_text(creator.get("kolId")),
+                    "达人名称": normalize_text(creator.get("达人昵称")) or normalize_text(creator.get("kolId")),
+                    "平台": normalize_text(creator.get("平台")) or "TikTok",
+                    "粉丝量": "",
+                    "达人分层(L0/L1/L2/L3)": "",
+                    "达人类型": normalize_text(creator.get("内容一级标签")),
+                    "备注": normalize_text(creator.get("备注")),
+                }
+            )
+        if rows:
+            return rows
+
     sheet = workbook["达人总览"]
     headers = sheet_headers(sheet)
     rows = []
-    for row in sheet.iter_rows(min_row=4, values_only=True):
+    for row in sheet.iter_rows(min_row=2, values_only=True):
         record = {headers[index]: row[index] for index in range(min(len(headers), len(row)))}
         if normalize_text(record.get("达人ID")):
             rows.append(record)
