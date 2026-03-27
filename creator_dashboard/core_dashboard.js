@@ -27,7 +27,12 @@ const state = {
   brandTag: "全部",
   activeTab: "overview",
   activeCreatorId: "",
+  overviewPage: 1,
+  focusPage: 1,
 };
+
+const OVERVIEW_PAGE_SIZE = 100;
+const FOCUS_PAGE_SIZE = 100;
 
 const elements = {
   generatedAt: document.querySelector("#generated-at"),
@@ -42,7 +47,9 @@ const elements = {
   resultTitle: document.querySelector("#result-title"),
   resultSubtitle: document.querySelector("#result-subtitle"),
   overviewBody: document.querySelector("#overview-body"),
+  overviewPagination: document.querySelector("#overview-pagination"),
   focusBody: document.querySelector("#focus-body"),
+  focusPagination: document.querySelector("#focus-pagination"),
   recordBody: document.querySelector("#record-body"),
   metricList: document.querySelector("#metric-list"),
   searchInput: document.querySelector("#search-input"),
@@ -277,7 +284,7 @@ function populateFilters() {
   populateSelect(elements.statusFilter, unique(combined.map((item) => item["当前合作状态"])));
   populateSelect(elements.priorityFilter, unique(combined.map((item) => item["优先级"])));
   populateSelect(elements.platformFilter, unique(combined.map((item) => item["平台"])));
-  populateSelect(elements.repurchaseFilter, unique(combined.map((item) => item["是否进入复投(Y/N)"])));
+  populateSelect(elements.repurchaseFilter, ["Y", "N"]);
   populateSelect(elements.brandFilter, unique(combined.flatMap((item) => splitMultiValue(item["品牌标签"]))));
 }
 
@@ -346,6 +353,44 @@ function renderAssumptions() {
     .join("");
 }
 
+function paginateRows(rows, page, pageSize) {
+  const total = rows.length;
+  const totalPages = Math.max(1, Math.ceil(total / pageSize));
+  const safePage = Math.min(Math.max(page, 1), totalPages);
+  const start = (safePage - 1) * pageSize;
+  return {
+    total,
+    totalPages,
+    page: safePage,
+    start,
+    end: Math.min(start + pageSize, total),
+    rows: rows.slice(start, start + pageSize),
+  };
+}
+
+function renderPagination(container, payload, onPageChange) {
+  if (!container) return;
+  if (!payload.total) {
+    container.innerHTML = "";
+    return;
+  }
+  container.innerHTML = `
+    <div>显示 ${payload.start + 1}-${payload.end} / 共 ${payload.total} 条</div>
+    <div class="button-row">
+      <button class="ghost-button" type="button" data-page-action="prev" ${payload.page <= 1 ? "disabled" : ""}>上一页</button>
+      <span>第 ${payload.page} / ${payload.totalPages} 页</span>
+      <button class="ghost-button" type="button" data-page-action="next" ${payload.page >= payload.totalPages ? "disabled" : ""}>下一页</button>
+    </div>
+  `;
+  container.querySelectorAll("[data-page-action]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const action = button.dataset.pageAction;
+      const nextPage = action === "prev" ? payload.page - 1 : payload.page + 1;
+      onPageChange(nextPage);
+    });
+  });
+}
+
 function getProfileUrl(row) {
   const explicit = String(row["主页链接"] || "").trim();
   if (explicit) return explicit;
@@ -357,11 +402,17 @@ function renderOverview() {
   const rows = filteredOverview();
   elements.resultTitle.textContent = `${rows.length} 个 Creator 达人`;
   elements.resultSubtitle.textContent = `展示全量唯一 Creator 聚合结果，重点池单独维护为 189 人`;
+  const pageData = paginateRows(rows, state.overviewPage, OVERVIEW_PAGE_SIZE);
+  state.overviewPage = pageData.page;
   if (!rows.length) {
     elements.overviewBody.innerHTML = '<tr><td colspan="11"><div class="empty-state">当前筛选下没有匹配达人。</div></td></tr>';
+    renderPagination(elements.overviewPagination, pageData, (page) => {
+      state.overviewPage = page;
+      render();
+    });
     return;
   }
-  elements.overviewBody.innerHTML = rows
+  elements.overviewBody.innerHTML = pageData.rows
     .map((row) => {
       const url = getProfileUrl(row);
       return `
@@ -392,15 +443,25 @@ function renderOverview() {
       if (creator) openDetail(creator);
     });
   });
+  renderPagination(elements.overviewPagination, pageData, (page) => {
+    state.overviewPage = page;
+    render();
+  });
 }
 
 function renderFocus() {
   const rows = filteredFocus();
+  const pageData = paginateRows(rows, state.focusPage, FOCUS_PAGE_SIZE);
+  state.focusPage = pageData.page;
   if (!rows.length) {
     elements.focusBody.innerHTML = '<tr><td colspan="9"><div class="empty-state">当前筛选下没有匹配的重点达人。</div></td></tr>';
+    renderPagination(elements.focusPagination, pageData, (page) => {
+      state.focusPage = page;
+      render();
+    });
     return;
   }
-  elements.focusBody.innerHTML = rows
+  elements.focusBody.innerHTML = pageData.rows
     .map(
       (row) => `
       <tr>
@@ -427,6 +488,10 @@ function renderFocus() {
       const creator = renderedFocus.find((item) => item["达人ID"] === button.dataset.focusEditId);
       if (creator) openDetail(creator);
     });
+  });
+  renderPagination(elements.focusPagination, pageData, (page) => {
+    state.focusPage = page;
+    render();
   });
 }
 
@@ -611,6 +676,8 @@ function setupTabs() {
 function setupFilters() {
   elements.searchInput.addEventListener("input", (event) => {
     state.search = event.target.value.trim().toLowerCase();
+    state.overviewPage = 1;
+    state.focusPage = 1;
     render();
   });
   [
@@ -623,6 +690,8 @@ function setupFilters() {
   ].forEach(([key, stateKey]) => {
     elements[key].addEventListener("change", (event) => {
       state[stateKey] = event.target.value;
+      state.overviewPage = 1;
+      state.focusPage = 1;
       render();
     });
   });
