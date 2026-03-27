@@ -62,6 +62,17 @@
                 <select id="platform-filter"></select>
               </label>
             </div>
+
+            <div class="grid-two">
+              <label class="field">
+                <span>复投筛选</span>
+                <select id="repurchase-filter"></select>
+              </label>
+              <label class="field">
+                <span>品牌标签</span>
+                <select id="brand-filter"></select>
+              </label>
+            </div>
           </section>
 
           <section class="panel">
@@ -116,7 +127,7 @@
           <section class="panel tabs-panel">
             <div class="tabs">
               <button class="tab is-active" data-tab="overview" type="button">达人总览</button>
-              <button class="tab" data-tab="focus" type="button">L0/L1重点达人池</button>
+              <button class="tab" data-tab="focus" type="button">189重点达人池</button>
               <button class="tab" data-tab="records" type="button">合作记录明细</button>
               <button class="tab" data-tab="metrics" type="button">运营驾驶舱</button>
             </div>
@@ -127,13 +138,14 @@
                   <p class="panel__eyebrow">Overview</p>
                   <h2 id="result-title">核心达人总览</h2>
                 </div>
-                <p id="result-subtitle" class="subtle">基于同步版工作簿生成</p>
+                <p id="result-subtitle" class="subtle">展示 Creator 全量唯一达人，一行一达人</p>
               </div>
               <div class="table-wrap">
                 <table>
                   <thead>
                     <tr>
                       <th>达人</th>
+                      <th>品牌标签</th>
                       <th>分层</th>
                       <th>状态</th>
                       <th>历史GMV</th>
@@ -154,21 +166,23 @@
               <div class="list-toolbar">
                 <div>
                   <p class="panel__eyebrow">Focus Pool</p>
-                  <h2>L0 / L1 重点达人池</h2>
+                  <h2>189 重点达人池</h2>
                 </div>
-                <p class="subtle">高优先级核心达人，适合重点跟进</p>
+                <p class="subtle">固定读取既有 189 个核心达人，人工维护字段可继续同步</p>
               </div>
               <div class="table-wrap">
                 <table>
                   <thead>
                     <tr>
                       <th>达人</th>
+                      <th>品牌标签</th>
                       <th>分层</th>
                       <th>平台</th>
                       <th>历史GMV</th>
                       <th>状态</th>
                       <th>优先级</th>
                       <th>动作</th>
+                      <th>操作</th>
                     </tr>
                   </thead>
                   <tbody id="focus-body"></tbody>

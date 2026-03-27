@@ -23,6 +23,8 @@ const state = {
   status: "全部",
   priority: "全部",
   platform: "全部",
+  repurchase: "全部",
+  brandTag: "全部",
   activeTab: "overview",
   activeCreatorId: "",
 };
@@ -35,6 +37,8 @@ const elements = {
   statusFilter: document.querySelector("#status-filter"),
   priorityFilter: document.querySelector("#priority-filter"),
   platformFilter: document.querySelector("#platform-filter"),
+  repurchaseFilter: document.querySelector("#repurchase-filter"),
+  brandFilter: document.querySelector("#brand-filter"),
   resultTitle: document.querySelector("#result-title"),
   resultSubtitle: document.querySelector("#result-subtitle"),
   overviewBody: document.querySelector("#overview-body"),
@@ -59,7 +63,9 @@ const elements = {
 
 let payload;
 let baseOverview = [];
+let baseFocus = [];
 let renderedOverview = [];
+let renderedFocus = [];
 let remoteRawFieldsById = {};
 let remoteCoreOverridesById = {};
 let localCoreOverridesById = {};
@@ -81,6 +87,13 @@ function escapeHtml(value) {
 
 function unique(items) {
   return [...new Set(items.filter(Boolean))].sort((a, b) => a.localeCompare(b, "zh-CN"));
+}
+
+function splitMultiValue(value) {
+  return String(value || "")
+    .split(/\s*\/\s*/)
+    .map((item) => item.trim())
+    .filter(Boolean);
 }
 
 function toNumber(value) {
@@ -259,10 +272,13 @@ function populateSelect(select, options) {
 }
 
 function populateFilters() {
-  populateSelect(elements.levelFilter, unique(baseOverview.map((item) => item["达人分层(L0/L1/L2/L3)"])));
-  populateSelect(elements.statusFilter, unique(renderedOverview.map((item) => item["当前合作状态"])));
-  populateSelect(elements.priorityFilter, unique(renderedOverview.map((item) => item["优先级"])));
-  populateSelect(elements.platformFilter, unique(baseOverview.map((item) => item["平台"])));
+  const combined = [...renderedOverview, ...renderedFocus];
+  populateSelect(elements.levelFilter, unique(combined.map((item) => item["达人分层(L0/L1/L2/L3)"])));
+  populateSelect(elements.statusFilter, unique(combined.map((item) => item["当前合作状态"])));
+  populateSelect(elements.priorityFilter, unique(combined.map((item) => item["优先级"])));
+  populateSelect(elements.platformFilter, unique(combined.map((item) => item["平台"])));
+  populateSelect(elements.repurchaseFilter, unique(combined.map((item) => item["是否进入复投(Y/N)"])));
+  populateSelect(elements.brandFilter, unique(combined.flatMap((item) => splitMultiValue(item["品牌标签"]))));
 }
 
 function matches(row) {
@@ -272,11 +288,13 @@ function matches(row) {
   if (state.status !== "全部" && row["当前合作状态"] !== state.status) return false;
   if (state.priority !== "全部" && row["优先级"] !== state.priority) return false;
   if (state.platform !== "全部" && row["平台"] !== state.platform) return false;
+  if (state.repurchase !== "全部" && row["是否进入复投(Y/N)"] !== state.repurchase) return false;
+  if (state.brandTag !== "全部" && !splitMultiValue(row["品牌标签"]).includes(state.brandTag)) return false;
   return true;
 }
 
-function filteredOverview() {
-  return [...renderedOverview.filter(matches)].sort((a, b) => {
+function sortRows(rows) {
+  return [...rows].sort((a, b) => {
     const gmvGap = toNumber(b["历史总GMV"]) - toNumber(a["历史总GMV"]);
     if (gmvGap !== 0) return gmvGap;
     const recentGap = toNumber(b["90天GMV"]) - toNumber(a["90天GMV"]);
@@ -285,9 +303,12 @@ function filteredOverview() {
   });
 }
 
+function filteredOverview() {
+  return sortRows(renderedOverview.filter(matches));
+}
+
 function filteredFocus() {
-  const ids = new Set(payload.focusPool.map((item) => item["达人ID"]));
-  return filteredOverview().filter((item) => ids.has(item["达人ID"]));
+  return sortRows(renderedFocus.filter(matches));
 }
 
 function filteredRecords() {
@@ -295,16 +316,16 @@ function filteredRecords() {
   return payload.records.filter((item) => ids.has(item["达人ID"]));
 }
 
-function renderStats(rows) {
-  const highPriority = rows.filter((item) => item["优先级"] === "高").length;
-  const inProgress = rows.filter((item) => item["当前合作状态"] === "在合作").length;
-  const focus = rows.filter((item) => ["L0", "L1"].includes(item["达人分层(L0/L1/L2/L3)"])).length;
-  const timeout = rows.filter((item) => item["是否超时未合作"] === "Y").length;
+function renderStats(overviewRows, focusRows) {
+  const activeRows = state.activeTab === "focus" ? focusRows : overviewRows;
+  const highPriority = activeRows.filter((item) => item["优先级"] === "高").length;
+  const timeout = activeRows.filter((item) => item["是否超时未合作"] === "Y").length;
+  const repurchase = activeRows.filter((item) => item["是否进入复投(Y/N)"] === "Y").length;
   const cards = [
-    { label: "当前达人", value: rows.length, note: `总池 ${renderedOverview.length}` },
-    { label: "高优先级", value: highPriority, note: "建议优先跟进" },
-    { label: "L0/L1 数量", value: focus, note: "核心重点池" },
-    { label: "超时人数", value: timeout, note: `在合作 ${inProgress}` },
+    { label: "当前达人", value: overviewRows.length, note: `全量 Creator / 总池 ${renderedOverview.length}` },
+    { label: "重点池人数", value: focusRows.length, note: `固定 189 池 / 缺失 ${payload.stats.missingFocusCount || 0}` },
+    { label: "高优先级", value: highPriority, note: state.activeTab === "focus" ? "当前重点池筛选结果" : "当前总览筛选结果" },
+    { label: "复投 / 超时", value: `${repurchase} / ${timeout}`, note: "当前筛选结果" },
   ];
   elements.statsGrid.innerHTML = cards
     .map(
@@ -326,16 +347,18 @@ function renderAssumptions() {
 }
 
 function getProfileUrl(row) {
+  const explicit = String(row["主页链接"] || "").trim();
+  if (explicit) return explicit;
   const raw = String(row["达人ID"] || "").trim().replace(/^@+/, "");
   return raw ? `https://www.tiktok.com/@${encodeURIComponent(raw)}` : "";
 }
 
 function renderOverview() {
   const rows = filteredOverview();
-  elements.resultTitle.textContent = `${rows.length} 个核心监控达人`;
-  elements.resultSubtitle.textContent = `基于同步版工作簿生成，人工维护字段支持云端覆盖`;
+  elements.resultTitle.textContent = `${rows.length} 个 Creator 达人`;
+  elements.resultSubtitle.textContent = `展示全量唯一 Creator 聚合结果，重点池单独维护为 189 人`;
   if (!rows.length) {
-    elements.overviewBody.innerHTML = '<tr><td colspan="10"><div class="empty-state">当前筛选下没有匹配达人。</div></td></tr>';
+    elements.overviewBody.innerHTML = '<tr><td colspan="11"><div class="empty-state">当前筛选下没有匹配达人。</div></td></tr>';
     return;
   }
   elements.overviewBody.innerHTML = rows
@@ -349,6 +372,7 @@ function renderOverview() {
               <span>@${escapeHtml(row["达人ID"])}</span>
             </div>
           </td>
+          <td>${splitMultiValue(row["品牌标签"]).map((item) => `<span class="pill is-warm">${escapeHtml(item)}</span>`).join("") || "-"}</td>
           <td><span class="pill">${escapeHtml(row["达人分层(L0/L1/L2/L3)"])}</span></td>
           <td><span class="pill ${row["当前合作状态"] === "在合作" ? "is-warm" : "is-muted"}">${escapeHtml(row["当前合作状态"])}</span></td>
           <td>${escapeHtml(formatNumber(row["历史总GMV"]))}</td>
@@ -373,24 +397,37 @@ function renderOverview() {
 function renderFocus() {
   const rows = filteredFocus();
   if (!rows.length) {
-    elements.focusBody.innerHTML = '<tr><td colspan="7"><div class="empty-state">当前筛选下没有 L0/L1 达人。</div></td></tr>';
+    elements.focusBody.innerHTML = '<tr><td colspan="9"><div class="empty-state">当前筛选下没有匹配的重点达人。</div></td></tr>';
     return;
   }
   elements.focusBody.innerHTML = rows
     .map(
       (row) => `
       <tr>
-        <td>${escapeHtml(row["达人名称"])}</td>
+        <td>
+          <div class="creator-name">
+            <a class="creator-link" href="${escapeHtml(getProfileUrl(row))}" target="_blank" rel="noreferrer noopener">${escapeHtml(row["达人名称"])}</a>
+            <span>@${escapeHtml(row["达人ID"])}</span>
+          </div>
+        </td>
+        <td>${splitMultiValue(row["品牌标签"]).map((item) => `<span class="pill is-warm">${escapeHtml(item)}</span>`).join("") || "-"}</td>
         <td><span class="pill">${escapeHtml(row["达人分层(L0/L1/L2/L3)"])}</span></td>
         <td>${escapeHtml(row["平台"])}</td>
         <td>${escapeHtml(formatNumber(row["历史总GMV"]))}</td>
         <td>${escapeHtml(row["当前合作状态"])}</td>
-        <td><span class="pill is-warm">${escapeHtml(row["优先级"])}</span></td>
+        <td><span class="pill ${row["优先级"] === "高" ? "is-warm" : row["优先级"] === "中" ? "" : "is-muted"}">${escapeHtml(row["优先级"])}</span></td>
         <td>${escapeHtml(row["下一步动作"])}</td>
+        <td><button class="ghost-button table-action" type="button" data-focus-edit-id="${escapeHtml(row["达人ID"])}">编辑</button></td>
       </tr>
     `
     )
     .join("");
+  elements.focusBody.querySelectorAll("[data-focus-edit-id]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const creator = renderedFocus.find((item) => item["达人ID"] === button.dataset.focusEditId);
+      if (creator) openDetail(creator);
+    });
+  });
 }
 
 function renderRecords() {
@@ -432,8 +469,9 @@ function renderMetrics() {
 }
 
 function render() {
-  const rows = filteredOverview();
-  renderStats(rows);
+  const overviewRows = filteredOverview();
+  const focusRows = filteredFocus();
+  renderStats(overviewRows, focusRows);
   renderOverview();
   renderFocus();
   renderRecords();
@@ -501,6 +539,7 @@ function openDetail(row) {
       <p><strong>是否超时未合作：</strong>${escapeHtml(row["是否超时未合作"] || "-")}</p>
       <p><strong>当前合作状态：</strong>${escapeHtml(row["当前合作状态"] || "-")}</p>
       <p><strong>达人类型：</strong>${escapeHtml(row["达人类型"] || "-")}</p>
+      <p><strong>品牌标签：</strong>${escapeHtml(row["品牌标签"] || "-")}</p>
     </article>
     <article class="detail-card is-wide">
       <h3>人工维护</h3>
@@ -579,6 +618,8 @@ function setupFilters() {
     ["statusFilter", "status"],
     ["priorityFilter", "priority"],
     ["platformFilter", "platform"],
+    ["repurchaseFilter", "repurchase"],
+    ["brandFilter", "brandTag"],
   ].forEach(([key, stateKey]) => {
     elements[key].addEventListener("change", (event) => {
       state[stateKey] = event.target.value;
@@ -589,6 +630,7 @@ function setupFilters() {
 
 function rebuildWorkingRows() {
   renderedOverview = baseOverview.map((item) => mergeCoreValues(item));
+  renderedFocus = baseFocus.map((item) => mergeCoreValues(item));
 }
 
 async function refreshAfterMutation() {
@@ -600,7 +642,7 @@ async function refreshAfterMutation() {
   rebuildWorkingRows();
   populateFilters();
   render();
-  const current = renderedOverview.find((item) => item["达人ID"] === state.activeCreatorId);
+  const current = [...renderedOverview, ...renderedFocus].find((item) => item["达人ID"] === state.activeCreatorId);
   if (current && elements.detailModal.open) {
     openDetail(current);
   }
@@ -652,7 +694,7 @@ async function saveCreatorFromForm(formData) {
     persistLocalOverrides(localCoreOverridesById);
     rebuildWorkingRows();
     render();
-    const current = renderedOverview.find((item) => item["达人ID"] === creatorId);
+    const current = [...renderedOverview, ...renderedFocus].find((item) => item["达人ID"] === creatorId);
     if (current) openDetail(current);
     setSyncStatus(`未填写编辑人或口令，已暂存到当前浏览器：${creatorId}`);
     return;
@@ -669,7 +711,7 @@ async function saveCreatorFromForm(formData) {
     persistLocalOverrides(localCoreOverridesById);
     rebuildWorkingRows();
     render();
-    const current = renderedOverview.find((item) => item["达人ID"] === creatorId);
+    const current = [...renderedOverview, ...renderedFocus].find((item) => item["达人ID"] === creatorId);
     if (current) openDetail(current);
     setSyncStatus(`云端保存失败，已回退到本机暂存：${formatSyncError(error)}`);
   }
@@ -720,6 +762,7 @@ async function init() {
   window.setTimeout(updateSyncInputs, 0);
 
   baseOverview = payload.overview.map((item) => ({ ...item }));
+  baseFocus = payload.focusPool.map((item) => ({ ...item }));
   try {
     await loadRemoteOverrides();
     setSyncStatus(`已连接工作区 ${syncSettings.workspaceId}，当前可读共享维护结果。`);
