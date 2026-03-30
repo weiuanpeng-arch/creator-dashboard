@@ -6,6 +6,9 @@ import os
 import re
 from datetime import datetime, timedelta
 from pathlib import Path
+from urllib.error import URLError
+from urllib.parse import quote
+from urllib.request import Request, urlopen
 
 from openpyxl import load_workbook
 
@@ -24,6 +27,9 @@ CREATOR_POOL_JSON = BASE_DIR / "data" / "creator_pool.json"
 PIPELINE_STATE_PATH = Path("/Users/apple/Documents/Playground/tiktok_shop_sync/data/pipeline_state.json")
 AUTOMATION_TOML_PATH = Path(os.path.expanduser("~/.codex/automations/tiktok/automation.toml"))
 LEVEL_SHEET_PATH = Path("/Users/apple/Downloads/达人等级底表/达人等级底表.xlsx")
+SUPABASE_URL = "https://sbznfjnsirajqkkcwayj.supabase.co"
+SUPABASE_ANON_KEY = "sb_publishable_tM67K7Mi1qDUkemhgzDuGg_dsdwitBT"
+REST_PAGE_SIZE = 1000
 ANSI_ESCAPE_RE = re.compile(r"\x1B\[[0-?]*[ -/]*[@-~]")
 CONTROL_CHAR_RE = re.compile(r"[\x00-\x08\x0B-\x0C\x0E-\x1F]")
 
@@ -82,6 +88,30 @@ BRAND_ALIAS_MAP = {
     "icyee indonesia": "ICYEE",
     "icyee": "ICYEE",
 }
+
+CREATOR_RAW_COLUMNS = [
+    "stat_date",
+    "store_tag",
+    "creator_name",
+    "creator_handle",
+    "creator_key",
+    "affiliate_gmv",
+    "attributed_orders",
+    "videos",
+]
+
+VIDEO_RAW_COLUMNS = [
+    "stat_date",
+    "store_tag",
+    "creator_key",
+    "post_date",
+    "affiliate_video_gmv",
+    "video_orders",
+    "video_id",
+    "video_link",
+    "product_id",
+    "product_name",
+]
 
 
 def normalize_text(value: object) -> str:
@@ -161,6 +191,41 @@ def canonical_brand(value: object) -> str:
         if needle in text:
             return brand
     return ""
+
+
+def supabase_request_json(path: str, headers: dict[str, str] | None = None) -> tuple[object, dict[str, str]]:
+    request = Request(
+        f"{SUPABASE_URL}/rest/v1{path}",
+        headers={
+            "apikey": SUPABASE_ANON_KEY,
+            "Authorization": f"Bearer {SUPABASE_ANON_KEY}",
+            **(headers or {}),
+        },
+    )
+    with urlopen(request, timeout=60) as response:
+        payload = json.loads(response.read().decode("utf-8"))
+        return payload, dict(response.headers.items())
+
+
+def fetch_supabase_rows(table: str, columns: list[str], page_size: int = REST_PAGE_SIZE) -> list[dict[str, object]]:
+    encoded_select = quote(",".join(columns), safe=",")
+    offset = 0
+    rows: list[dict[str, object]] = []
+    while True:
+        batch, _headers = supabase_request_json(
+            f"/{table}?select={encoded_select}",
+            headers={
+                "Range-Unit": "items",
+                "Range": f"{offset}-{offset + page_size - 1}",
+            },
+        )
+        if not isinstance(batch, list):
+            raise RuntimeError(f"Unexpected Supabase response for {table}")
+        rows.extend(batch)
+        if len(batch) < page_size:
+            break
+        offset += page_size
+    return rows
 
 
 def extract_brands_from_text(value: object) -> set[str]:
@@ -314,6 +379,123 @@ def build_raw_creator_meta(workbook) -> tuple[dict[str, dict[str, object]], set[
         if candidate_score >= current_score:
             meta_by_key[key] = row
     return meta_by_key, valid_keys
+
+
+def build_db_creator_rollup() -> tuple[dict[str, dict[str, object]], dict[str, dict[str, object]], set[str]]:
+    rows = fetch_supabase_rows("tiktok_creator_performance_raw", CREATOR_RAW_COLUMNS)
+    latest_stat = max((parse_date(row.get("stat_date")) for row in rows if parse_date(row.get("stat_date"))), default=datetime.now())
+    cutoff_90 = latest_stat - timedelta(days=89)
+    grouped: dict[str, dict[str, object]] = {}
+    meta_by_key: dict[str, dict[str, object]] = {}
+    valid_keys: set[str] = set()
+    for row in rows:
+        key = normalize_text(row.get("creator_key"))
+        if not key:
+            continue
+        valid_keys.add(key)
+        stat_date = parse_date(row.get("stat_date"))
+        gmv = normalize_number(row.get("affiliate_gmv"))
+        orders = normalize_number(row.get("attributed_orders"))
+        videos = normalize_number(row.get("videos"))
+        group = grouped.setdefault(
+            key,
+            {
+                "历史总GMV": 0.0,
+                "90天GMV": 0.0,
+                "累计订单": 0.0,
+                "近90天订单": 0.0,
+                "累计视频数": 0.0,
+                "近90天视频数": 0.0,
+                "店铺标签": set(),
+                "最近统计日期": "",
+            },
+        )
+        group["历史总GMV"] += gmv
+        group["累计订单"] += orders
+        group["累计视频数"] += videos
+        group["店铺标签"].add(normalize_text(row.get("store_tag")))
+        if stat_date and stat_date >= cutoff_90:
+            group["90天GMV"] += gmv
+            group["近90天订单"] += orders
+            group["近90天视频数"] += videos
+        if stat_date:
+            date_text = stat_date.strftime("%Y-%m-%d")
+            if date_text > normalize_text(group.get("最近统计日期")):
+                group["最近统计日期"] = date_text
+                handle = normalize_text(row.get("creator_handle")) or key
+                meta_by_key[key] = {
+                    "达人名称": normalize_text(row.get("creator_name")),
+                    "达人主页标识": handle,
+                    "主页链接": f"https://www.tiktok.com/@{handle.lstrip('@')}" if handle else "",
+                    "Affiliate followers": "",
+                    "最近统计日期": date_text,
+                }
+    return grouped, meta_by_key, valid_keys
+
+
+def build_db_video_rollup() -> tuple[dict[str, dict[str, object]], dict[str, set[str]], dict[str, set[str]], set[str]]:
+    rows = fetch_supabase_rows("tiktok_video_performance_raw", VIDEO_RAW_COLUMNS)
+    latest_reference = max(
+        (
+            parse_date(row.get("post_date")) or parse_date(row.get("stat_date"))
+            for row in rows
+            if parse_date(row.get("post_date")) or parse_date(row.get("stat_date"))
+        ),
+        default=datetime.now(),
+    )
+    cutoff_30 = latest_reference - timedelta(days=29)
+    cutoff_90 = latest_reference - timedelta(days=89)
+    grouped: dict[str, dict[str, object]] = {}
+    brands_by_key: dict[str, set[str]] = {}
+    brands_by_pid: dict[str, set[str]] = {}
+    valid_keys: set[str] = set()
+    for row in rows:
+        key = normalize_text(row.get("creator_key"))
+        if not key:
+            continue
+        valid_keys.add(key)
+        post_date = parse_date(row.get("post_date"))
+        stat_date = parse_date(row.get("stat_date"))
+        gmv = normalize_number(row.get("affiliate_video_gmv"))
+        orders = normalize_number(row.get("video_orders"))
+        brand = canonical_brand(row.get("store_tag"))
+        if brand:
+            brands_by_key.setdefault(key, set()).add(brand)
+            pid = normalize_int_string(row.get("product_id"))
+            if pid:
+                brands_by_pid.setdefault(pid, set()).add(brand)
+        group = grouped.setdefault(
+            key,
+            {
+                "近30天发布视频GMV": 0.0,
+                "近30天订单": 0.0,
+                "近30天视频数": 0.0,
+                "近90天GMV": 0.0,
+                "近90天订单": 0.0,
+                "近90天视频数": 0.0,
+                "累计GMV": 0.0,
+                "累计订单": 0.0,
+                "累计视频数": 0.0,
+                "最近视频发布时间": "",
+                "最近统计日期": "",
+            },
+        )
+        group["累计GMV"] += gmv
+        group["累计订单"] += orders
+        group["累计视频数"] += 1
+        if stat_date and stat_date.strftime("%Y-%m-%d") > normalize_text(group.get("最近统计日期")):
+            group["最近统计日期"] = stat_date.strftime("%Y-%m-%d")
+        if post_date and post_date.strftime("%Y-%m-%d") > normalize_text(group.get("最近视频发布时间")):
+            group["最近视频发布时间"] = post_date.strftime("%Y-%m-%d")
+        if post_date and post_date >= cutoff_30:
+            group["近30天发布视频GMV"] += gmv
+            group["近30天订单"] += orders
+            group["近30天视频数"] += 1
+        if post_date and post_date >= cutoff_90:
+            group["近90天GMV"] += gmv
+            group["近90天订单"] += orders
+            group["近90天视频数"] += 1
+    return grouped, brands_by_key, brands_by_pid, valid_keys
 
 
 def build_video_brand_maps(workbook) -> tuple[dict[str, set[str]], dict[str, set[str]]]:
@@ -637,15 +819,41 @@ def build_row(
     return row
 
 
-def build_payload() -> dict[str, object]:
+def build_payload() -> tuple[dict[str, object], list[dict[str, object]]]:
     workbook = load_workbook(WORKBOOK_PATH, read_only=True, data_only=True)
     level_mapping = load_level_mapping()
     focus_seed_rows = build_focus_seed_rows(workbook)
     creator_mapping_by_source, creator_mapping_by_existing = build_creator_mapping(workbook)
-    creator_meta_by_key, valid_keys = build_raw_creator_meta(workbook)
-    fact_by_key = build_fact_rows(workbook)
-    video_brands_by_key, brands_by_pid = build_video_brand_maps(workbook)
+    workbook_fact_by_key = build_fact_rows(workbook)
     record_rows = build_records(workbook)
+    source_label = str(WORKBOOK_PATH)
+
+    try:
+        creator_rollup, creator_meta_by_key, creator_keys = build_db_creator_rollup()
+        video_rollup, video_brands_by_key, brands_by_pid, video_keys = build_db_video_rollup()
+        valid_keys = creator_keys | video_keys
+        fact_by_key: dict[str, dict[str, object]] = {}
+        for key in sorted(valid_keys):
+            merged = dict(workbook_fact_by_key.get(key, {}))
+            creator_stats = creator_rollup.get(key, {})
+            video_stats = video_rollup.get(key, {})
+            if creator_stats:
+                merged["累计GMV"] = round(normalize_number(creator_stats.get("历史总GMV")), 2)
+                merged["近90天GMV"] = round(normalize_number(creator_stats.get("90天GMV")), 2)
+                merged["最近统计日期"] = normalize_text(creator_stats.get("最近统计日期"))
+                merged["达人名称"] = normalize_text(creator_meta_by_key.get(key, {}).get("达人名称")) or normalize_text(merged.get("达人名称"))
+                merged["主页链接"] = normalize_text(creator_meta_by_key.get(key, {}).get("主页链接")) or normalize_text(merged.get("主页链接"))
+            if video_stats:
+                merged["近30天GMV"] = round(normalize_number(video_stats.get("近30天发布视频GMV")), 2)
+                merged["最近视频发布时间"] = normalize_text(video_stats.get("最近视频发布时间"))
+                merged["最近统计日期"] = normalize_text(video_stats.get("最近统计日期")) or normalize_text(merged.get("最近统计日期"))
+            fact_by_key[key] = merged
+        source_label = "supabase_raw + workbook_enrichment"
+    except Exception:
+        creator_meta_by_key, valid_keys = build_raw_creator_meta(workbook)
+        fact_by_key = workbook_fact_by_key
+        video_brands_by_key, brands_by_pid = build_video_brand_maps(workbook)
+        source_label = f"{WORKBOOK_PATH} (fallback)"
 
     overview_rows: list[dict[str, object]] = []
     all_keys = sorted(set(fact_by_key) | set(valid_keys))
@@ -693,19 +901,20 @@ def build_payload() -> dict[str, object]:
     sync_health = build_sync_health()
     metrics = rows_as_dicts(workbook["运营驾驶舱"], start_row=2) + build_sync_health_metrics(sync_health)
 
-    return {
+    payload = {
         "generatedAt": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-        "source": str(WORKBOOK_PATH),
+        "source": source_label,
         "assumptions": assumptions,
         "stats": stats,
         "syncHealth": sync_health,
-        "overview": [{header: row.get(header, "") for header in OVERVIEW_HEADERS} | {"主页链接": row.get("主页链接", ""), "统一达人键": row.get("统一达人键", "")} for row in overview_rows],
+        "overview": [],
         "gmvFocusPool": [{header: row.get(header, "") for header in OVERVIEW_HEADERS} | {"主页链接": row.get("主页链接", ""), "统一达人键": row.get("统一达人键", "")} for row in gmv_focus_rows],
         "focusPool": [{header: row.get(header, "") for header in FOCUS_HEADERS} | {"主页链接": row.get("主页链接", ""), "统一达人键": row.get("统一达人键", "")} for row in focus_rows],
         "records": record_rows,
         "metrics": metrics,
         "missingFocusIds": missing_focus_ids,
     }
+    return payload, overview_rows
 
 
 def export_csv(overview_rows: list[dict[str, object]]) -> None:
@@ -717,7 +926,7 @@ def export_csv(overview_rows: list[dict[str, object]]) -> None:
 
 
 def main() -> None:
-    payload = build_payload()
+    payload, overview_rows = build_payload()
     OUTPUT_JSON.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
     OUTPUT_JS.write_text(
         "window.__CORE_CREATOR_DASHBOARD__ = "
@@ -725,7 +934,7 @@ def main() -> None:
         + ";\n",
         encoding="utf-8",
     )
-    export_csv(payload["overview"])
+    export_csv(overview_rows)
     print(f"Wrote {OUTPUT_JSON}")
     print(f"Wrote {OUTPUT_JS}")
     print(f"Wrote {OUTPUT_CSV}")

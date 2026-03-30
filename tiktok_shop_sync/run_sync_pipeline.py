@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
 import subprocess
 import time
@@ -21,6 +22,7 @@ CREATOR_EXPORT_SCRIPT = BASE_DIR / "export_creator_analysis_reports.mjs"
 IMPORT_EXPORT_SCRIPT = BASE_DIR / "import_exported_reports.py"
 BUILD_SCRIPT = BASE_DIR / "build_sync_workbook.py"
 SYNC_SCRIPT = BASE_DIR / "sync_into_workbook.py"
+SUPABASE_REST_SYNC_SCRIPT = BASE_DIR / "sync_to_supabase_rest.py"
 DASHBOARD_BUILD_SCRIPT = BASE_DIR.parent / "creator_dashboard" / "build_core_dashboard.py"
 CHROME_BRIDGE_DIR = BASE_DIR.parent / "chrome_bridge"
 CHROME_DEBUG_SCRIPT = CHROME_BRIDGE_DIR / "start_chrome_debug.sh"
@@ -70,6 +72,20 @@ def run_capture(cmd: list[str]) -> str:
         detail = completed.stderr.strip() or stdout or f"exit={completed.returncode}"
         raise RuntimeError(f"{' '.join(cmd)} -> {detail}")
     return stdout
+
+
+def run_json_command(cmd: list[str], env: dict[str, str] | None = None) -> dict[str, Any]:
+    print(">", " ".join(cmd))
+    completed = subprocess.run(cmd, check=False, capture_output=True, text=True, env=env)
+    stdout = completed.stdout.strip()
+    if stdout:
+        print(stdout)
+    if completed.stderr.strip():
+        print(completed.stderr.strip())
+    if completed.returncode != 0:
+        detail = completed.stderr.strip() or stdout or f"exit={completed.returncode}"
+        raise RuntimeError(f"{' '.join(cmd)} -> {detail}")
+    return json.loads(stdout or "{}")
 
 
 def endpoint_ready(port: int) -> bool:
@@ -193,6 +209,27 @@ def summarize_error(error: Exception) -> str:
     text = text.replace("\r", "\n")
     text = re.sub(r"\n{3,}", "\n\n", text).strip()
     return text or error.__class__.__name__
+
+
+def db_first_enabled() -> bool:
+    flag = os.environ.get("TIKTOK_DB_FIRST", "").strip().lower()
+    if flag in {"0", "false", "no", "off"}:
+        return False
+    return True
+
+
+def cleanup_file(path_text: str) -> None:
+    path = Path(path_text)
+    if path.exists():
+        path.unlink()
+        print(f"[cleanup] removed {path}")
+
+
+def cleanup_store_exports(store_state: dict[str, Any]) -> None:
+    for key in ("last_video_export", "last_creator_export"):
+        value = str(store_state.get(key) or "").strip()
+        if value:
+            cleanup_file(value)
 
 
 def parse_skip_message(message: str) -> tuple[str, str] | None:
@@ -442,10 +479,27 @@ def main() -> None:
         "run_at": run_date,
         **pre_rebuild_summary,
         "dashboard_rebuilt": False,
+        "db_synced": False,
+        "db_sync_error": "",
         "rebuild_error": "",
         "overall_status": "pending_rebuild",
     }
     save_state(state)
+
+    db_sync_result: dict[str, Any] | None = None
+    if db_first_enabled():
+        try:
+            db_sync_result = run_json_command(["python3", str(SUPABASE_REST_SYNC_SCRIPT)])
+            state["last_pipeline_run"]["db_synced"] = bool(db_sync_result.get("connected"))
+            state["last_pipeline_run"]["db_sync_error"] = ""
+            for store in selected_stores:
+                key = normalize_key(store["store_tag"])
+                cleanup_store_exports(state.get("stores", {}).get(key, {}))
+        except Exception as error:
+            state["last_pipeline_run"]["db_synced"] = False
+            state["last_pipeline_run"]["db_sync_error"] = summarize_error(error)
+            save_state(state)
+            raise
 
     try:
         run(["python3", str(SYNC_SCRIPT)])
@@ -455,6 +509,8 @@ def main() -> None:
             "run_at": run_date,
             **pipeline_summary(state),
             "dashboard_rebuilt": False,
+            "db_synced": bool((db_sync_result or {}).get("connected")) if db_first_enabled() else False,
+            "db_sync_error": "" if not db_first_enabled() else str(state.get("last_pipeline_run", {}).get("db_sync_error", "")),
             "rebuild_error": summarize_error(error),
             "overall_status": "rebuild_failed",
             "last_success_run_at": previous_success_run_at,
@@ -478,6 +534,8 @@ def main() -> None:
         "run_at": run_date,
         **final_summary,
         "dashboard_rebuilt": True,
+        "db_synced": bool((db_sync_result or {}).get("connected")) if db_first_enabled() else False,
+        "db_sync_error": "" if not db_first_enabled() else str(state.get("last_pipeline_run", {}).get("db_sync_error", "")),
         "rebuild_error": "",
         "overall_status": overall_status,
         "last_success_run_at": last_success_run_at,
