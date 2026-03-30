@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import csv
 import json
+import os
 import re
+import shutil
 from collections import defaultdict
 from datetime import datetime, timedelta
 from difflib import SequenceMatcher
@@ -14,7 +16,8 @@ from urllib.request import Request, urlopen
 from openpyxl import Workbook, load_workbook
 
 
-WORKBOOK_PATH = Path("/Users/apple/Desktop/达人多次合作监控看板_同步版.xlsx")
+DEFAULT_WORKBOOK_PATH = Path("/Users/apple/Desktop/达人多次合作监控看板_同步版.xlsx")
+FALLBACK_WORKBOOK_PATH = Path("/Users/apple/Documents/Playground/tiktok_shop_sync/data/达人多次合作监控看板_同步版.xlsx")
 VIDEO_CSV = Path("/Users/apple/Documents/Playground/tiktok_shop_sync/data/normalized/video_performance.csv")
 CREATOR_CSV = Path("/Users/apple/Documents/Playground/tiktok_shop_sync/data/normalized/creator_performance.csv")
 CREATOR_HISTORY_CSV = Path("/Users/apple/Documents/Playground/tiktok_shop_sync/data/normalized/creator_history_gmv.csv")
@@ -177,6 +180,26 @@ RECORD_HEADERS = [
     "是否复投(Y/N)",
     "备注",
 ]
+
+
+def resolve_workbook_path() -> Path:
+    override = os.environ.get("TIKTOK_SYNC_WORKBOOK_PATH", "").strip()
+    if override:
+        return Path(override).expanduser()
+
+    default_parent = DEFAULT_WORKBOOK_PATH.parent
+    if os.access(default_parent, os.W_OK):
+        return DEFAULT_WORKBOOK_PATH
+
+    FALLBACK_WORKBOOK_PATH.parent.mkdir(parents=True, exist_ok=True)
+    if not FALLBACK_WORKBOOK_PATH.exists():
+        if not DEFAULT_WORKBOOK_PATH.exists():
+            raise FileNotFoundError(f"missing workbook: {DEFAULT_WORKBOOK_PATH}")
+        shutil.copy2(DEFAULT_WORKBOOK_PATH, FALLBACK_WORKBOOK_PATH)
+    return FALLBACK_WORKBOOK_PATH
+
+
+WORKBOOK_PATH = resolve_workbook_path()
 
 
 def normalize_text(value: object) -> str:
@@ -1076,6 +1099,9 @@ def update_focus_sheet(workbook) -> None:
 def update_metrics_sheet(workbook) -> None:
     sheet = workbook["运营驾驶舱"]
     overview = workbook["达人总览"]
+    pipeline_state = load_pipeline_state()
+    stores = pipeline_state.get("stores", {}) if isinstance(pipeline_state, dict) else {}
+    last_pipeline_run = pipeline_state.get("last_pipeline_run", {}) if isinstance(pipeline_state, dict) else {}
     headers = [normalize_text(cell.value) for cell in overview[1]]
     rows = []
     for row in overview.iter_rows(min_row=4, values_only=True):
@@ -1097,7 +1123,68 @@ def update_metrics_sheet(workbook) -> None:
         {"指标": "平均合作频次", "数值": avg_freq, "说明": "达人近30天平均合作次数", "": ""},
         {"指标": "超时达人数量", "数值": timeout, "说明": "超过周期未合作人数", "": ""},
         {"指标": "产品覆盖率", "数值": f"{(product_covered / len(rows) * 100):.1f}%" if rows else "0%", "说明": "当前进入复投的人群覆盖率", "": ""},
+        {"指标": "自动化任务状态", "数值": "ACTIVE", "说明": "当前正式日更任务状态", "": "每日 19:00"},
+        {"指标": "上次自动化运行", "数值": normalize_text(last_pipeline_run.get("run_at")) or "未记录", "说明": "最近一次流水线运行日期", "": ""},
+        {"指标": "上次成功同步", "数值": normalize_text(last_pipeline_run.get("last_success_run_at")) or "未记录", "说明": "最近一次成功完成日更的日期", "": ""},
+        {"指标": "当前待同步日期", "数值": normalize_text(last_pipeline_run.get("next_sync_date")) or "未记录", "说明": "四店铺中最早待推进的增量日期", "": ""},
     ]
+    last_failure = ""
+    for failure in last_pipeline_run.get("failures", []) if isinstance(last_pipeline_run, dict) else []:
+        if isinstance(failure, dict):
+            last_failure = f"{normalize_text(failure.get('store'))}: {normalize_text(failure.get('message'))}"
+            if last_failure.strip(": "):
+                break
+    data_rows.append({"指标": "最近失败原因", "数值": last_failure or "无", "说明": "如果最近一次没有失败，这里显示无", "": ""})
+    success_count = 0
+    waiting_count = 0
+    failed_count = 0
+    for store_key in ("letme", "stypro", "sparco", "icyee"):
+        store = stores.get(store_key, {}) if isinstance(stores, dict) else {}
+        status = normalize_text(store.get("last_status") or store.get("last_mode")) or "未记录"
+        window_status = normalize_text(store.get("window_status"))
+        last_daily = normalize_text(store.get("last_daily_date"))
+        next_date = normalize_text(store.get("next_increment_date"))
+        last_error = normalize_text(store.get("last_error"))
+        if status == "success" and last_daily:
+            value = f"已同步至 {last_daily}"
+            success_count += 1
+        elif status == "waiting" and last_daily:
+            value = f"已同步至 {last_daily}"
+            window_status = "waiting"
+            success_count += 1
+        elif status == "error":
+            value = "运行失败"
+            failed_count += 1
+        elif status == "skipped":
+            value = "已跳过"
+        elif status == "bootstrap_required":
+            value = "待导入历史基线"
+        else:
+            value = status
+        if window_status == "waiting" and next_date:
+            note = f"等待 {next_date} 数据窗口"
+            waiting_count += 1
+        elif next_date:
+            note = f"待同步日期 {next_date}"
+        else:
+            note = "无待同步日期"
+        data_rows.append(
+            {
+                "指标": f"{store_key.upper()}同步状态",
+                "数值": value,
+                "说明": note,
+                "": last_error,
+            }
+        )
+    data_rows.insert(
+        10,
+        {
+            "指标": "店铺同步结果",
+            "数值": f"{success_count} 已同步 / {waiting_count} 等待 / {failed_count} 失败",
+            "说明": "当前四店铺同步健康度",
+            "": "",
+        },
+    )
     write_sheet_rows(sheet, [normalize_text(cell.value) for cell in sheet[1]], data_rows, start_row=2)
 
 
@@ -1130,7 +1217,8 @@ def append_log(workbook, status: str, message: str, video_rows: int, creator_row
         )
     next_row = sheet.max_row + 1
     sheet.cell(row=next_row, column=1, value=datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
-    sheet.cell(row=next_row, column=2, value="手工导入同步")
+    run_mode = "自动日更同步" if last_pipeline_run else "手工导入同步"
+    sheet.cell(row=next_row, column=2, value=run_mode)
     sheet.cell(row=next_row, column=3, value="ALL")
     sheet.cell(row=next_row, column=4, value="Videos + Creator + Cooperation")
     sheet.cell(row=next_row, column=5, value="最近可用批次")

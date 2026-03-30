@@ -378,45 +378,142 @@ def load_automation_status() -> dict[str, str]:
     }
 
 
-def build_sync_health_metrics() -> list[dict[str, object]]:
+def store_health_row(store_key: str, store: dict[str, object]) -> dict[str, object]:
+    status = normalize_text(store.get("last_status") or store.get("last_mode")) or "未记录"
+    window_status = normalize_text(store.get("window_status"))
+    last_daily = normalize_text(store.get("last_daily_date"))
+    next_date = normalize_text(store.get("next_increment_date"))
+    last_error = normalize_text(store.get("last_error"))
+    if status == "success" and last_daily:
+        value = f"已同步至 {last_daily}"
+    elif status == "skipped":
+        value = "已跳过"
+    elif status == "error":
+        value = "运行失败"
+    elif status == "bootstrap_required":
+        value = "待导入历史基线"
+    elif status == "waiting" and last_daily:
+        value = f"已同步至 {last_daily}"
+        window_status = "waiting"
+    else:
+        value = status
+    if window_status == "waiting" and next_date:
+        note = f"等待 {next_date} 数据窗口"
+    elif next_date:
+        note = f"待同步日期 {next_date}"
+    else:
+        note = "无待同步日期"
+    return {
+        "store": store_key.upper(),
+        "value": value,
+        "note": note,
+        "error": last_error,
+    }
+
+
+def build_sync_health() -> dict[str, object]:
     pipeline_state = load_pipeline_state()
     stores = pipeline_state.get("stores", {}) if isinstance(pipeline_state, dict) else {}
     run = pipeline_state.get("last_pipeline_run", {}) if isinstance(pipeline_state, dict) else {}
     automation = load_automation_status()
+    failures = run.get("failures", []) if isinstance(run, dict) else []
+    last_failure = ""
+    if isinstance(failures, list) and failures:
+        latest = failures[0]
+        if isinstance(latest, dict):
+            last_failure = f"{normalize_text(latest.get('store'))}: {normalize_text(latest.get('message'))}"
+    if not last_failure:
+        for store_key in ("letme", "stypro", "sparco", "icyee"):
+            store = stores.get(store_key, {}) if isinstance(stores, dict) else {}
+            last_error = normalize_text(store.get("last_error"))
+            if last_error and normalize_text(store.get("last_status")) == "error":
+                last_failure = f"{store_key.upper()}: {last_error}"
+                break
+
+    store_rows = []
+    success_count = 0
+    waiting_count = 0
+    failed_count = 0
+    for store_key in ("letme", "stypro", "sparco", "icyee"):
+        store = stores.get(store_key, {}) if isinstance(stores, dict) else {}
+        row = store_health_row(store_key, store)
+        store_rows.append(row)
+        value = normalize_text(row.get("value"))
+        note = normalize_text(row.get("note"))
+        if "已同步至" in value:
+            success_count += 1
+        if "等待" in note:
+            waiting_count += 1
+        if "失败" in value:
+            failed_count += 1
+
+    last_success_run_at = normalize_text(run.get("last_success_run_at"))
+    if not last_success_run_at:
+        store_successes = [
+            normalize_text(store.get("last_success_at"))
+            for store in stores.values()
+            if isinstance(store, dict) and normalize_text(store.get("last_success_at"))
+        ]
+        last_success_run_at = max(store_successes) if store_successes else "未记录"
+
+    return {
+        "automationStatus": automation.get("status", "UNKNOWN"),
+        "schedule": automation.get("schedule", ""),
+        "lastRunAt": normalize_text(run.get("run_at")) or "未记录",
+        "lastSuccessRunAt": last_success_run_at,
+        "nextSyncDate": normalize_text(run.get("next_sync_date")) or "未记录",
+        "summary": f"{success_count} 已同步 / {waiting_count} 等待 / {failed_count} 失败",
+        "lastFailure": last_failure or "无",
+        "stores": store_rows,
+    }
+
+
+def build_sync_health_metrics(sync_health: dict[str, object]) -> list[dict[str, object]]:
     metrics: list[dict[str, object]] = [
         {
             "指标": "自动化任务状态",
-            "数值": automation.get("status", "UNKNOWN"),
+            "数值": sync_health.get("automationStatus", "UNKNOWN"),
             "说明": "当前正式日更任务定义",
-            "": automation.get("schedule", ""),
+            "": sync_health.get("schedule", ""),
         },
         {
             "指标": "上次自动化运行",
-            "数值": normalize_text(run.get("run_at")) or "未记录",
+            "数值": sync_health.get("lastRunAt", "未记录"),
             "说明": "最近一次流水线运行日期",
             "": "",
         },
         {
+            "指标": "上次成功同步",
+            "数值": sync_health.get("lastSuccessRunAt", "未记录"),
+            "说明": "最近一次成功完成日更的日期",
+            "": "",
+        },
+        {
             "指标": "当前待同步日期",
-            "数值": normalize_text(run.get("next_sync_date")) or "未记录",
+            "数值": sync_health.get("nextSyncDate", "未记录"),
             "说明": "四店铺中最早待推进的增量日期",
             "": "",
         },
         {
             "指标": "店铺同步结果",
-            "数值": f"{normalize_text(run.get('success') or 0)} 成功 / {normalize_text(run.get('failed') or 0)} 失败",
+            "数值": sync_health.get("summary", ""),
             "说明": "最近一次自动化四店铺结果",
             "": "",
         },
+        {
+            "指标": "最近失败原因",
+            "数值": sync_health.get("lastFailure", "无"),
+            "说明": "如果最近一次没有失败，这里显示无",
+            "": "",
+        },
     ]
-    for store_key in ("letme", "stypro", "sparco", "icyee"):
-        store = stores.get(store_key, {}) if isinstance(stores, dict) else {}
+    for store in sync_health.get("stores", []):
         metrics.append(
             {
-                "指标": f"{store_key.upper()}同步状态",
-                "数值": normalize_text(store.get("last_status") or store.get("last_mode")) or "未记录",
-                "说明": normalize_text(store.get("next_increment_date")) or "无待同步日期",
-                "": normalize_text(store.get("last_error")),
+                "指标": f"{normalize_text(store.get('store'))}同步状态",
+                "数值": normalize_text(store.get("value")) or "未记录",
+                "说明": normalize_text(store.get("note")) or "无待同步日期",
+                "": normalize_text(store.get("error")),
             }
         )
     return metrics
@@ -561,13 +658,15 @@ def build_payload() -> dict[str, object]:
         "missingFocusCount": len(missing_focus_ids),
     }
 
-    metrics = rows_as_dicts(workbook["运营驾驶舱"], start_row=2) + build_sync_health_metrics()
+    sync_health = build_sync_health()
+    metrics = rows_as_dicts(workbook["运营驾驶舱"], start_row=2) + build_sync_health_metrics(sync_health)
 
     return {
         "generatedAt": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
         "source": str(WORKBOOK_PATH),
         "assumptions": assumptions,
         "stats": stats,
+        "syncHealth": sync_health,
         "overview": [{header: row.get(header, "") for header in OVERVIEW_HEADERS} | {"主页链接": row.get("主页链接", ""), "统一达人键": row.get("统一达人键", "")} for row in overview_rows],
         "focusPool": [{header: row.get(header, "") for header in FOCUS_HEADERS} | {"主页链接": row.get("主页链接", ""), "统一达人键": row.get("统一达人键", "")} for row in focus_rows],
         "records": record_rows,

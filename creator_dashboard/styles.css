@@ -240,6 +240,13 @@ body::before {
   gap: 12px;
 }
 
+.sync-health-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
 .assumption-item,
 .metric-card {
   border: 1px solid var(--line);
@@ -249,6 +256,43 @@ body::before {
   color: var(--muted);
   line-height: 1.6;
   font-size: 14px;
+}
+
+.sync-card {
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  padding: 14px;
+  background: rgba(255, 255, 255, 0.8);
+  color: var(--muted);
+  line-height: 1.5;
+  font-size: 14px;
+}
+
+.sync-card strong {
+  display: block;
+  margin: 8px 0 6px;
+  font-size: 22px;
+  line-height: 1.15;
+  color: var(--ink);
+}
+
+.sync-card__eyebrow {
+  margin: 0;
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
+  font-size: 11px;
+  color: var(--secondary);
+  font-weight: 700;
+}
+
+.sync-card--ok {
+  border-color: rgba(47, 107, 98, 0.22);
+  background: rgba(47, 107, 98, 0.08);
+}
+
+.sync-card--warn {
+  border-color: rgba(202, 90, 52, 0.22);
+  background: rgba(202, 90, 52, 0.08);
 }
 
 .metric-card strong {

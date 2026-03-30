@@ -81,6 +81,7 @@ const elements = {
   focusPagination: document.querySelector("#focus-pagination"),
   recordBody: document.querySelector("#record-body"),
   metricList: document.querySelector("#metric-list"),
+  syncHealthGrid: document.querySelector("#sync-health-grid"),
   searchInput: document.querySelector("#search-input"),
   tabs: document.querySelectorAll(".tab"),
   panels: document.querySelectorAll(".tab-panel"),
@@ -523,6 +524,54 @@ function renderMetrics() {
     .join("");
 }
 
+function renderSyncHealth() {
+  const sync = payload.syncHealth || {};
+  const stores = Array.isArray(sync.stores) ? sync.stores : [];
+  const cards = [
+    {
+      label: "自动化状态",
+      value: sync.automationStatus || "UNKNOWN",
+      note: sync.schedule || "未配置",
+      tone: sync.automationStatus === "ACTIVE" ? "ok" : "warn",
+    },
+    {
+      label: "上次成功同步",
+      value: sync.lastSuccessRunAt || "未记录",
+      note: `最近运行 ${sync.lastRunAt || "未记录"}`,
+      tone: "neutral",
+    },
+    {
+      label: "当前待同步日期",
+      value: sync.nextSyncDate || "未记录",
+      note: sync.summary || "",
+      tone: "neutral",
+    },
+    {
+      label: "最近失败原因",
+      value: sync.lastFailure || "无",
+      note: "无失败时显示为无",
+      tone: sync.lastFailure && sync.lastFailure !== "无" ? "warn" : "ok",
+    },
+    ...stores.map((store) => ({
+      label: `${store.store} 店铺`,
+      value: store.value || "未记录",
+      note: [store.note, store.error].filter(Boolean).join(" · "),
+      tone: String(store.value || "").includes("失败") ? "warn" : "neutral",
+    })),
+  ];
+  elements.syncHealthGrid.innerHTML = cards
+    .map(
+      (card) => `
+        <article class="sync-card sync-card--${escapeHtml(card.tone)}">
+          <p class="sync-card__eyebrow">${escapeHtml(card.label)}</p>
+          <strong>${escapeHtml(card.value)}</strong>
+          <p>${escapeHtml(card.note || "")}</p>
+        </article>
+      `
+    )
+    .join("");
+}
+
 function renderTableHead(node) {
   if (!node) return;
   node.innerHTML = `
@@ -597,6 +646,7 @@ function render() {
   renderOverview();
   renderFocus();
   renderRecords();
+  renderSyncHealth();
   renderMetrics();
 }
 

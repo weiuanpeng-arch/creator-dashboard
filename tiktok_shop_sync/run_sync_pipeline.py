@@ -107,6 +107,15 @@ def ensure_browser_profiles(stores: list[dict[str, Any]]) -> None:
         launch_profile_for_store(store)
 
 
+def browser_skip_reason(error: Exception) -> str:
+    message = summarize_error(error)
+    if "endpoint did not become ready" in message:
+        return "browser profile debugging endpoint unavailable"
+    if "未配置浏览器 profile 启动脚本" in message:
+        return message
+    return f"browser profile unavailable: {message}"
+
+
 def parse_iso_date(value: str) -> date:
     return date.fromisoformat(value)
 
@@ -185,12 +194,13 @@ def pipeline_summary(state: dict[str, Any]) -> dict[str, Any]:
     failed = 0
     next_dates: list[str] = []
     failures: list[dict[str, str]] = []
+    last_success_runs: list[str] = []
     for key, store_state in stores.items():
         status = store_state.get("last_status") or store_state.get("last_mode") or ""
+        if store_state.get("window_status") == "waiting":
+            waiting += 1
         if status == "success":
             success += 1
-        elif status == "waiting":
-            waiting += 1
         elif status == "bootstrap_required":
             bootstrap += 1
         elif status == "skipped":
@@ -206,6 +216,9 @@ def pipeline_summary(state: dict[str, Any]) -> dict[str, Any]:
         next_date = str(store_state.get("next_increment_date") or "").strip()
         if next_date:
             next_dates.append(next_date)
+        last_success_at = str(store_state.get("last_success_at") or "").strip()
+        if last_success_at:
+            last_success_runs.append(last_success_at)
     return {
         "success": success,
         "waiting": waiting,
@@ -214,6 +227,7 @@ def pipeline_summary(state: dict[str, Any]) -> dict[str, Any]:
         "failed": failed,
         "next_sync_date": min(next_dates) if next_dates else "",
         "failures": failures,
+        "last_success_run_at": max(last_success_runs) if last_success_runs else "",
     }
 
 
@@ -227,8 +241,9 @@ def main() -> None:
 
     selected = set(args.stores or [])
     selected_stores = [store for store in config["stores"] if not selected or store["store_tag"] in selected]
-    ensure_browser_profiles(selected_stores)
     run_date = date.today().isoformat()
+    latest_safe_date = date.today() - timedelta(days=1)
+
     for store in selected_stores:
         store_tag = store["store_tag"]
         key = normalize_key(store_tag)
@@ -246,6 +261,7 @@ def main() -> None:
                     "last_mode": "bootstrap_required",
                     "last_run_at": run_date,
                     "last_status": "bootstrap_required",
+                    "window_status": "",
                     "last_error": "",
                 }
             )
@@ -254,18 +270,34 @@ def main() -> None:
         if effective_mode != "daily":
             raise ValueError(f"unsupported runtime mode: {effective_mode}")
         start_date, end_date, stat_date, range_label = daily_range(store_state)
-        latest_safe_date = date.today() - timedelta(days=1)
         if parse_iso_date(stat_date) > latest_safe_date:
             store_state.update(
                 {
                     "last_mode": "daily_waiting",
                     "last_run_at": run_date,
                     "waiting_for_date": stat_date,
-                    "last_status": "waiting",
+                    "window_status": "waiting",
                     "last_error": "",
                 }
             )
             print(f"[skip] {store_tag}: 下一次增量日期 {stat_date} 还未到可拉取窗口，当前仅拉取到 {latest_safe_date.isoformat()}。")
+            continue
+        try:
+            launch_profile_for_store(store)
+        except Exception as error:
+            reason = browser_skip_reason(error)
+            store_state.update(
+                {
+                    "last_mode": effective_mode,
+                    "last_run_at": run_date,
+                    "last_status": "skipped",
+                    "window_status": "",
+                    "last_error": reason,
+                    "last_skip_code": "browser_unavailable",
+                    "last_requested_range": {"start": start_date, "end": end_date},
+                }
+            )
+            print(f"[skip] {store_tag}: {reason}")
             continue
         try:
             video_stdout = run_capture(
@@ -346,6 +378,7 @@ def main() -> None:
                     "last_video_export": str(video_export_path),
                     "last_creator_export": str(creator_export_path),
                     "last_status": "success",
+                    "window_status": "",
                     "last_error": "",
                     "last_success_at": run_date,
                 }
@@ -360,6 +393,7 @@ def main() -> None:
                         "last_mode": effective_mode,
                         "last_run_at": run_date,
                         "last_status": "skipped",
+                        "window_status": "",
                         "last_error": skip_reason,
                         "last_skip_code": skip_code,
                         "last_requested_range": {"start": start_date, "end": end_date},
@@ -372,6 +406,7 @@ def main() -> None:
                     "last_mode": effective_mode,
                     "last_run_at": run_date,
                     "last_status": "error",
+                    "window_status": "",
                     "last_error": message,
                     "last_requested_range": {"start": start_date, "end": end_date},
                 }
