@@ -1032,7 +1032,11 @@ async function handleCooperationUpload() {
       throw new Error("合作表没有可上传的数据，请检查表头是否正确。");
     }
     const result = await replaceCloudUpload("replace_tiktok_cooperation_upload", file.name, rows);
-    setUploadStatus(`合作表上传完成：${result?.inserted || rows.length} 行已同步到云端，后续更新会优先读取云端合作表。`);
+    const inserted = Number(result?.inserted ?? 0);
+    if (inserted <= 0) {
+      throw new Error("合作表接口已响应，但云端写入 0 行，请检查表头和文件内容。");
+    }
+    setUploadStatus(`合作表上传完成：${inserted} 行已同步到云端，后续更新会优先读取云端合作表。`);
   } catch (error) {
     setUploadStatus(`合作表上传失败：${formatSyncError(error)}`);
   }
@@ -1055,7 +1059,11 @@ async function handleSkuUpload() {
       throw new Error("SPU/SKU 表没有可上传的数据，请检查表头是否正确。");
     }
     const result = await replaceCloudUpload("replace_tiktok_product_sku_cost_upload", file.name, rows);
-    setUploadStatus(`SPU/SKU 表上传完成：${result?.inserted || rows.length} 行已同步到云端，后续更新会优先读取云端产品表。`);
+    const inserted = Number(result?.inserted ?? 0);
+    if (inserted <= 0) {
+      throw new Error("SPU/SKU 接口已响应，但云端写入 0 行，请检查表头和文件内容。");
+    }
+    setUploadStatus(`SPU/SKU 表上传完成：${inserted} 行已同步到云端，后续更新会优先读取云端产品表。`);
   } catch (error) {
     setUploadStatus(`SPU/SKU 表上传失败：${formatSyncError(error)}`);
   }
