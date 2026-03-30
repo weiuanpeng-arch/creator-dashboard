@@ -819,6 +819,20 @@ def build_row(
     return row
 
 
+FACT_ENRICHMENT_FIELDS = {
+    "合作表_最近合作日期",
+    "合作表_当前合作状态",
+    "合作表_近30天合作次数",
+    "合作表_平均间隔天数",
+    "合作表_距离上次发布天数",
+    "合作表_平均交付时间",
+    "合作表_最近合作费用",
+    "手工_复投产品链接",
+    "手工_复投产品PID",
+    "备注",
+}
+
+
 def build_payload() -> tuple[dict[str, object], list[dict[str, object]]]:
     workbook = load_workbook(WORKBOOK_PATH, read_only=True, data_only=True)
     level_mapping = load_level_mapping()
@@ -834,7 +848,8 @@ def build_payload() -> tuple[dict[str, object], list[dict[str, object]]]:
         valid_keys = creator_keys | video_keys
         fact_by_key: dict[str, dict[str, object]] = {}
         for key in sorted(valid_keys):
-            merged = dict(workbook_fact_by_key.get(key, {}))
+            workbook_fact = workbook_fact_by_key.get(key, {})
+            merged = {field: workbook_fact.get(field, "") for field in FACT_ENRICHMENT_FIELDS}
             creator_stats = creator_rollup.get(key, {})
             video_stats = video_rollup.get(key, {})
             if creator_stats:
@@ -843,10 +858,16 @@ def build_payload() -> tuple[dict[str, object], list[dict[str, object]]]:
                 merged["最近统计日期"] = normalize_text(creator_stats.get("最近统计日期"))
                 merged["达人名称"] = normalize_text(creator_meta_by_key.get(key, {}).get("达人名称")) or normalize_text(merged.get("达人名称"))
                 merged["主页链接"] = normalize_text(creator_meta_by_key.get(key, {}).get("主页链接")) or normalize_text(merged.get("主页链接"))
+            else:
+                merged["累计GMV"] = 0
+                merged["近90天GMV"] = 0
             if video_stats:
                 merged["近30天GMV"] = round(normalize_number(video_stats.get("近30天发布视频GMV")), 2)
                 merged["最近视频发布时间"] = normalize_text(video_stats.get("最近视频发布时间"))
                 merged["最近统计日期"] = normalize_text(video_stats.get("最近统计日期")) or normalize_text(merged.get("最近统计日期"))
+            else:
+                merged["近30天GMV"] = 0
+                merged["最近视频发布时间"] = ""
             fact_by_key[key] = merged
         source_label = "supabase_raw + workbook_enrichment"
     except Exception:
