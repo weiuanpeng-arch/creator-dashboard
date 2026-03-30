@@ -248,6 +248,28 @@ def build_focus_seed_rows(workbook) -> list[dict[str, object]]:
     return rows
 
 
+def load_existing_overview_rows(workbook) -> list[dict[str, object]]:
+    sheet = workbook["达人总览"]
+    headers = sheet_headers(sheet)
+    rows: list[dict[str, object]] = []
+    for row in sheet.iter_rows(min_row=2, values_only=True):
+        record = {headers[index]: row[index] for index in range(min(len(headers), len(row)))}
+        creator_id = normalize_text(record.get("达人ID"))
+        if not creator_id or creator_id == "说明":
+            continue
+        rows.append(
+            {
+                header: record.get(header, "")
+                for header in OVERVIEW_HEADERS
+            }
+            | {
+                "主页链接": normalize_text(record.get("主页链接")) or f"https://www.tiktok.com/@{creator_id}",
+                "统一达人键": normalize_text(record.get("统一达人键")) or creator_id,
+            }
+        )
+    return rows
+
+
 def load_level_mapping() -> dict[str, str]:
     if not LEVEL_SHEET_PATH.exists():
         return {}
@@ -627,6 +649,9 @@ def build_payload() -> dict[str, object]:
         mapping_row = creator_mapping_by_source.get(key, {})
         brand_tags = build_brand_tags(key, fact_row, video_brands_by_key, brands_by_pid)
         overview_rows.append(build_row(key, fact_row, meta_row, mapping_row, None, brand_tags, level_mapping))
+
+    if not overview_rows:
+        overview_rows = load_existing_overview_rows(workbook)
 
     focus_rows: list[dict[str, object]] = []
     missing_focus_ids: list[str] = []
