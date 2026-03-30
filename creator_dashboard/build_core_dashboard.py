@@ -24,6 +24,8 @@ CREATOR_POOL_JSON = BASE_DIR / "data" / "creator_pool.json"
 PIPELINE_STATE_PATH = Path("/Users/apple/Documents/Playground/tiktok_shop_sync/data/pipeline_state.json")
 AUTOMATION_TOML_PATH = Path(os.path.expanduser("~/.codex/automations/tiktok/automation.toml"))
 LEVEL_SHEET_PATH = Path("/Users/apple/Downloads/达人等级底表/达人等级底表.xlsx")
+ANSI_ESCAPE_RE = re.compile(r"\x1B\[[0-?]*[ -/]*[@-~]")
+CONTROL_CHAR_RE = re.compile(r"[\x00-\x08\x0B-\x0C\x0E-\x1F]")
 
 OVERVIEW_HEADERS = [
     "达人ID",
@@ -87,7 +89,10 @@ def normalize_text(value: object) -> str:
         return ""
     if isinstance(value, datetime):
         return value.strftime("%Y-%m-%d")
-    return str(value).strip()
+    text = str(value)
+    text = ANSI_ESCAPE_RE.sub("", text)
+    text = CONTROL_CHAR_RE.sub("", text)
+    return text.strip()
 
 
 def normalize_number(value: object) -> float:
@@ -329,12 +334,12 @@ def build_video_brand_maps(workbook) -> tuple[dict[str, set[str]], dict[str, set
     return brands_by_key, brands_by_pid
 
 
-def build_fact_rows(workbook, valid_keys: set[str]) -> dict[str, dict[str, object]]:
+def build_fact_rows(workbook) -> dict[str, dict[str, object]]:
     rows = rows_as_dicts(workbook["统一达人事实表"], start_row=2)
     fact_by_key: dict[str, dict[str, object]] = {}
     for row in rows:
         key = normalize_text(row.get("统一达人键"))
-        if not key or key == "说明" or key not in valid_keys:
+        if not key or key == "说明":
             continue
         current = fact_by_key.get(key)
         if current is None or score_fact_row(row) > score_fact_row(current):
@@ -638,20 +643,18 @@ def build_payload() -> dict[str, object]:
     focus_seed_rows = build_focus_seed_rows(workbook)
     creator_mapping_by_source, creator_mapping_by_existing = build_creator_mapping(workbook)
     creator_meta_by_key, valid_keys = build_raw_creator_meta(workbook)
-    fact_by_key = build_fact_rows(workbook, valid_keys)
+    fact_by_key = build_fact_rows(workbook)
     video_brands_by_key, brands_by_pid = build_video_brand_maps(workbook)
     record_rows = build_records(workbook)
 
     overview_rows: list[dict[str, object]] = []
-    for key in sorted(valid_keys):
+    all_keys = sorted(set(fact_by_key) | set(valid_keys))
+    for key in all_keys:
         fact_row = fact_by_key.get(key, {})
         meta_row = creator_meta_by_key.get(key, {})
         mapping_row = creator_mapping_by_source.get(key, {})
         brand_tags = build_brand_tags(key, fact_row, video_brands_by_key, brands_by_pid)
         overview_rows.append(build_row(key, fact_row, meta_row, mapping_row, None, brand_tags, level_mapping))
-
-    if not overview_rows:
-        overview_rows = load_existing_overview_rows(workbook)
 
     focus_rows: list[dict[str, object]] = []
     missing_focus_ids: list[str] = []

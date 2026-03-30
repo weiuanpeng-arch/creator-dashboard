@@ -5,13 +5,11 @@ import playwright from "/Users/apple/Documents/Playground/chrome_bridge/node_mod
 const { chromium } = playwright;
 
 const configs = {
-  letme: { port: 9222, store: "Letme Home Living" },
-  stypro: { port: 9231, store: "STYPRO.ID" },
-  sparco: { port: 9232, store: "spar.co jewelry" },
-  icyee: { port: 9234, store: "Icyee Indonesia" },
+  letme: { port: 9222, store: "Letme Home Living", shopId: "7495867457043466817" },
+  stypro: { port: 9231, store: "STYPRO.ID", shopId: "7496061001205123232" },
+  sparco: { port: 9232, store: "spar.co jewelry", shopId: "7495612479548001053" },
+  icyee: { port: 9234, store: "Icyee Indonesia", shopId: "7496020661994686844" },
 };
-
-const CREATOR_ANALYSIS_URL = "https://affiliate-id.tokopedia.com/data/creator-analysis?platform_data_source=shop";
 
 class ExportSkipError extends Error {
   constructor(reason, detail = "") {
@@ -46,6 +44,14 @@ function addOneDay(value) {
   const date = new Date(`${value}T00:00:00Z`);
   date.setUTCDate(date.getUTCDate() + 1);
   return date.toISOString().slice(0, 10);
+}
+
+function buildCreatorAnalysisUrl(config) {
+  return `https://affiliate-id.tokopedia.com/data/creator-analysis?shop_region=ID&shop_id=${config.shopId}&platform_data_source=shop`;
+}
+
+function buildSellerLandingUrl(config) {
+  return `https://seller-id.tokopedia.com/affiliate/landing?shop_region=ID&shop_id=${config.shopId}`;
 }
 
 async function describePageState(page) {
@@ -106,6 +112,47 @@ async function waitForCreatorAnalysis(page) {
       document.querySelectorAll('input[placeholder="Start date"], input[placeholder="End date"]').length >= 2,
     { timeout: 45000 },
   ).then(() => true).catch(() => false);
+  if (!ready) {
+    const state = await ensurePageReady(page, "Creator Analysis");
+    throw new Error(`creator analysis page not ready: ${state.url} :: ${state.bodyText}`);
+  }
+  await page.waitForTimeout(2000);
+}
+
+async function openCreatorAnalysisPage(page, config) {
+  const targetUrl = buildCreatorAnalysisUrl(config);
+  const landingUrl = buildSellerLandingUrl(config);
+  if (!page.url().includes("affiliate-id.tokopedia.com/data/creator-analysis")) {
+    await page.goto(landingUrl, { waitUntil: "domcontentloaded", timeout: 60000 }).catch(() => {});
+    await page.waitForTimeout(3000);
+    await page.goto(targetUrl, { waitUntil: "domcontentloaded", timeout: 60000 }).catch(() => {});
+  } else if (!page.url().includes(`shop_id=${config.shopId}`)) {
+    await page.goto(targetUrl, { waitUntil: "domcontentloaded", timeout: 60000 }).catch(() => {});
+  }
+
+  let ready = await page.waitForFunction(
+    () =>
+      document.body.innerText.includes("Creator") &&
+      document.body.innerText.includes("Export") &&
+      document.querySelectorAll('input[placeholder="Start date"], input[placeholder="End date"]').length >= 2,
+    { timeout: 45000 },
+  ).then(() => true).catch(() => false);
+  if (!ready) {
+    const firstState = await describePageState(page);
+    const firstClassified = classifyPageState(firstState, "Creator Analysis");
+    if (firstClassified?.reason === "not_logged_in") {
+      await page.goto(landingUrl, { waitUntil: "domcontentloaded", timeout: 60000 }).catch(() => {});
+      await page.waitForTimeout(5000);
+      await page.goto(targetUrl, { waitUntil: "domcontentloaded", timeout: 60000 }).catch(() => {});
+      ready = await page.waitForFunction(
+        () =>
+          document.body.innerText.includes("Creator") &&
+          document.body.innerText.includes("Export") &&
+          document.querySelectorAll('input[placeholder="Start date"], input[placeholder="End date"]').length >= 2,
+        { timeout: 45000 },
+      ).then(() => true).catch(() => false);
+    }
+  }
   if (!ready) {
     const state = await ensurePageReady(page, "Creator Analysis");
     throw new Error(`creator analysis page not ready: ${state.url} :: ${state.bodyText}`);
@@ -487,10 +534,8 @@ async function main() {
     if (page === undefined) {
       page = await context.newPage();
     }
-    await page.goto(CREATOR_ANALYSIS_URL, { waitUntil: "domcontentloaded", timeout: 60000 }).catch(() => {});
+    await openCreatorAnalysisPage(page, config);
     await page.bringToFront();
-    await waitForCreatorAnalysis(page);
-    await page.waitForTimeout(5000);
     await ensurePageReady(page, "Creator Analysis");
     const initialRange = await readAppliedRange(page);
     const result =

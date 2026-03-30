@@ -5,10 +5,10 @@ import playwright from "/Users/apple/Documents/Playground/chrome_bridge/node_mod
 const { chromium } = playwright;
 
 const configs = {
-  letme: { port: 9222, store: "Letme Home Living" },
-  stypro: { port: 9231, store: "STYPRO.ID" },
-  sparco: { port: 9232, store: "spar.co jewelry" },
-  icyee: { port: 9234, store: "Icyee Indonesia" },
+  letme: { port: 9222, store: "Letme Home Living", shopId: "7495867457043466817" },
+  stypro: { port: 9231, store: "STYPRO.ID", shopId: "7496061001205123232" },
+  sparco: { port: 9232, store: "spar.co jewelry", shopId: "7495612479548001053" },
+  icyee: { port: 9234, store: "Icyee Indonesia", shopId: "7496020661994686844" },
 };
 
 const MODULES = {
@@ -40,6 +40,14 @@ class ExportSkipError extends Error {
 function formatRangeToken(value) {
   const [month, day, year] = value.split("/");
   return `${year}${month}${day}`;
+}
+
+function buildPerformanceUrl(config) {
+  return `https://affiliate-id.tokopedia.com/insights/transaction-analysis?shop_region=ID&shop_id=${config.shopId}`;
+}
+
+function buildSellerLandingUrl(config) {
+  return `https://seller-id.tokopedia.com/affiliate/landing?shop_region=ID&shop_id=${config.shopId}`;
 }
 
 function parseUsDate(value) {
@@ -139,22 +147,44 @@ async function ensurePageReady(page, pageLabel) {
   return state;
 }
 
-async function openPerformancePage(page) {
+async function openPerformancePage(page, config) {
+  const targetUrl = buildPerformanceUrl(config);
+  const landingUrl = buildSellerLandingUrl(config);
   if (!page.url().includes("affiliate-id.tokopedia.com/insights/transaction-analysis")) {
-    await page.goto("https://affiliate-id.tokopedia.com/insights/transaction-analysis", {
-      waitUntil: "domcontentloaded",
-      timeout: 60000,
-    }).catch(() => {});
+    await page.goto(landingUrl, { waitUntil: "domcontentloaded", timeout: 60000 }).catch(() => {});
+    await page.waitForTimeout(3000);
+    await page.goto(targetUrl, { waitUntil: "domcontentloaded", timeout: 60000 }).catch(() => {});
   }
-  const ready = await page.waitForFunction(
+  let ready = await page.waitForFunction(
     () => document.body.innerText.includes("Videos") && document.body.innerText.includes("Export"),
     { timeout: 30000 },
   ).then(() => true).catch(() => false);
+  if (!ready) {
+    const firstState = await describePageState(page);
+    const firstClassified = classifyPageState(firstState, "Performance");
+    if (firstClassified?.reason === "not_logged_in") {
+      await page.goto(landingUrl, { waitUntil: "domcontentloaded", timeout: 60000 }).catch(() => {});
+      await page.waitForTimeout(5000);
+      await page.goto(targetUrl, { waitUntil: "domcontentloaded", timeout: 60000 }).catch(() => {});
+      ready = await page.waitForFunction(
+        () => document.body.innerText.includes("Videos") && document.body.innerText.includes("Export"),
+        { timeout: 30000 },
+      ).then(() => true).catch(() => false);
+    }
+  }
   if (!ready) {
     const state = await ensurePageReady(page, "Performance");
     throw new Error(`performance page not ready: ${state.url} :: ${state.bodyText}`);
   }
   await page.waitForTimeout(4000);
+}
+
+async function resolveRangePickerIndex(page, preferredIndex = 1) {
+  const count = await page.locator(".arco-picker-range").count();
+  if (count <= 0) {
+    throw new Error("date range picker not found");
+  }
+  return count > preferredIndex ? preferredIndex : count - 1;
 }
 
 async function selectTab(page, tabId, tabText, waitText) {
@@ -170,6 +200,7 @@ async function selectTab(page, tabId, tabText, waitText) {
 }
 
 async function readAppliedRange(page, pickerIndex = 1) {
+  const resolvedIndex = await resolveRangePickerIndex(page, pickerIndex);
   return page.evaluate((index) => {
     const pickers = [...document.querySelectorAll(".arco-picker-range")];
     const picker = pickers[index];
@@ -179,11 +210,12 @@ async function readAppliedRange(page, pickerIndex = 1) {
     const inputs = [...picker.querySelectorAll('input[placeholder="Start date"], input[placeholder="End date"]')];
     const values = inputs.slice(0, 2).map((node) => (node.value || "").trim());
     return { start: values[0] || "", end: values[1] || "" };
-  }, pickerIndex);
+  }, resolvedIndex);
 }
 
 async function clickSameDayRange(page, pickerIndex, dateValue) {
-  const picker = page.locator(".arco-picker-range").nth(pickerIndex);
+  const resolvedIndex = await resolveRangePickerIndex(page, pickerIndex);
+  const picker = page.locator(".arco-picker-range").nth(resolvedIndex);
   await picker.click({ force: true });
   await page.waitForTimeout(800);
   for (let attempt = 0; attempt < 12; attempt += 1) {
@@ -244,7 +276,7 @@ async function clickSameDayRange(page, pickerIndex, dateValue) {
       target
         ?.querySelectorAll('input[placeholder="Start date"], input[placeholder="End date"]')
         .forEach((node) => node.removeAttribute("readonly"));
-    }, pickerIndex);
+    }, resolvedIndex);
     const dateInputs = picker.locator('input[placeholder="Start date"], input[placeholder="End date"]');
     if ((await dateInputs.count()) >= 2) {
       await dateInputs.nth(0).fill(dateValue);
@@ -263,7 +295,8 @@ async function setDateRange(page, startDate, endDate, pickerIndex = 1) {
     await clickSameDayRange(page, pickerIndex, startDate);
     return readAppliedRange(page, pickerIndex);
   }
-  const picker = page.locator(".arco-picker-range").nth(pickerIndex);
+  const resolvedIndex = await resolveRangePickerIndex(page, pickerIndex);
+  const picker = page.locator(".arco-picker-range").nth(resolvedIndex);
   await picker.click({ force: true });
   await page.waitForTimeout(800);
   await page.evaluate((index) => {
@@ -271,7 +304,7 @@ async function setDateRange(page, startDate, endDate, pickerIndex = 1) {
     target
       ?.querySelectorAll('input[placeholder="Start date"], input[placeholder="End date"]')
       .forEach((node) => node.removeAttribute("readonly"));
-  }, pickerIndex);
+  }, resolvedIndex);
   const dateInputs = picker.locator('input[placeholder="Start date"], input[placeholder="End date"]');
   await dateInputs.nth(0).fill(startDate);
   await dateInputs.nth(1).fill(endDate);
@@ -469,7 +502,7 @@ async function main() {
         item.url().includes("affiliate-id.tokopedia.com/insights/transaction-analysis"),
       ) || (await context.newPage());
 
-    await openPerformancePage(page);
+    await openPerformancePage(page, config);
     // Details 区域上方的第二组日期控件才控制 Videos 导出区间。
     const appliedRange = await setDateRange(page, startDate, endDate, 1);
     await ensurePageReady(page, "Performance");

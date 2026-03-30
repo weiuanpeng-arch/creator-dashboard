@@ -14,10 +14,17 @@ from urllib.parse import quote
 from urllib.request import Request, urlopen
 
 from openpyxl import Workbook, load_workbook
+from build_sync_workbook import SOURCE_WORKBOOK, build_notes_sheet, build_sync_sheets, seed_creator_mapping
+from workbook_io import (
+    DESKTOP_WORKBOOK_PATH,
+    INTERNAL_WORKBOOK_PATH,
+    ensure_internal_workbook,
+    save_workbook_safely,
+)
 
 
-DEFAULT_WORKBOOK_PATH = Path("/Users/apple/Desktop/达人多次合作监控看板_同步版.xlsx")
-FALLBACK_WORKBOOK_PATH = Path("/Users/apple/Documents/Playground/tiktok_shop_sync/data/达人多次合作监控看板_同步版.xlsx")
+DEFAULT_WORKBOOK_PATH = DESKTOP_WORKBOOK_PATH
+FALLBACK_WORKBOOK_PATH = INTERNAL_WORKBOOK_PATH
 VIDEO_CSV = Path("/Users/apple/Documents/Playground/tiktok_shop_sync/data/normalized/video_performance.csv")
 CREATOR_CSV = Path("/Users/apple/Documents/Playground/tiktok_shop_sync/data/normalized/creator_performance.csv")
 CREATOR_HISTORY_CSV = Path("/Users/apple/Documents/Playground/tiktok_shop_sync/data/normalized/creator_history_gmv.csv")
@@ -35,6 +42,7 @@ COOP_XLSX_CANDIDATES = [
 ]
 SKU_XLSX = Path("/Users/apple/Desktop/SKU_COST.xlsx")
 CREATOR_POOL_JSON = Path("/Users/apple/Documents/Playground/creator_dashboard/data/creator_pool.json")
+LEVEL_SHEET_PATH = Path("/Users/apple/Downloads/达人等级底表/达人等级底表.xlsx")
 
 PUBLIC_READ_SYNC_SETTINGS = {
     "supabase_url": "https://sbznfjnsirajqkkcwayj.supabase.co",
@@ -186,20 +194,11 @@ def resolve_workbook_path() -> Path:
     override = os.environ.get("TIKTOK_SYNC_WORKBOOK_PATH", "").strip()
     if override:
         return Path(override).expanduser()
-
-    default_parent = DEFAULT_WORKBOOK_PATH.parent
-    if os.access(default_parent, os.W_OK):
-        return DEFAULT_WORKBOOK_PATH
-
-    FALLBACK_WORKBOOK_PATH.parent.mkdir(parents=True, exist_ok=True)
-    if not FALLBACK_WORKBOOK_PATH.exists():
-        if not DEFAULT_WORKBOOK_PATH.exists():
-            raise FileNotFoundError(f"missing workbook: {DEFAULT_WORKBOOK_PATH}")
-        shutil.copy2(DEFAULT_WORKBOOK_PATH, FALLBACK_WORKBOOK_PATH)
-    return FALLBACK_WORKBOOK_PATH
+    return ensure_internal_workbook(DEFAULT_WORKBOOK_PATH)
 
 
 WORKBOOK_PATH = resolve_workbook_path()
+ILLEGAL_EXCEL_CHAR_RE = re.compile(r"[\x00-\x08\x0B-\x0C\x0E-\x1F]")
 
 
 def normalize_text(value: object) -> str:
@@ -208,6 +207,24 @@ def normalize_text(value: object) -> str:
     if isinstance(value, datetime):
         return value.strftime("%Y-%m-%d")
     return str(value).strip()
+
+
+def sanitize_excel_text(value: object) -> str:
+    text = normalize_text(value)
+    if not text:
+        return ""
+    text = ILLEGAL_EXCEL_CHAR_RE.sub("", text)
+    if len(text) > 32767:
+        text = text[:32767]
+    return text
+
+
+def sanitize_excel_value(value: object) -> object:
+    if value is None:
+        return ""
+    if isinstance(value, (int, float, datetime)):
+        return value
+    return sanitize_excel_text(value)
 
 
 def parse_date(value: object) -> datetime | None:
@@ -290,7 +307,7 @@ def write_sheet_rows(sheet, headers: list[str], rows: list[dict[str, object]], s
         sheet.delete_rows(start_row, sheet.max_row - start_row + 1)
     for row_index, row in enumerate(rows, start=start_row):
         for col_index, header in enumerate(headers, start=1):
-            sheet.cell(row=row_index, column=col_index, value=row.get(header, ""))
+            sheet.cell(row=row_index, column=col_index, value=sanitize_excel_value(row.get(header, "")))
 
 
 def ensure_sheet(workbook, name: str, headers: list[str]):
@@ -299,7 +316,7 @@ def ensure_sheet(workbook, name: str, headers: list[str]):
     else:
         sheet = workbook.create_sheet(name)
     for index, header in enumerate(headers, start=1):
-        sheet.cell(row=1, column=index, value=header)
+        sheet.cell(row=1, column=index, value=sanitize_excel_text(header))
     return sheet
 
 
@@ -367,6 +384,28 @@ def load_creator_pool_tags() -> dict[str, dict[str, str]]:
         if not creator_id:
             continue
         mapping[creator_id] = {key: normalize_text(value) for key, value in creator.items()}
+    return mapping
+
+
+def load_level_mapping() -> dict[str, str]:
+    if not LEVEL_SHEET_PATH.exists():
+        return {}
+    workbook = load_workbook(LEVEL_SHEET_PATH, read_only=True, data_only=True)
+    sheet = workbook[workbook.sheetnames[0]]
+    headers = [normalize_text(cell.value) for cell in next(sheet.iter_rows(min_row=1, max_row=1))]
+    level_idx = headers.index("level") if "level" in headers else 0
+    creator_idx = 2 if len(headers) >= 3 else 0
+    mapping: dict[str, str] = {}
+    for row in sheet.iter_rows(min_row=2, values_only=True):
+        values = list(row)
+        if not values:
+            continue
+        level = normalize_text(values[level_idx] if level_idx < len(values) else "")
+        creator_ref = normalize_text(values[creator_idx] if creator_idx < len(values) else "")
+        for key in {normalize_handle(creator_ref), normalize_handle(creator_ref.lstrip("@"))}:
+            if key and level:
+                mapping[key] = level
+    workbook.close()
     return mapping
 
 
@@ -459,9 +498,18 @@ def aggregate_creator_rows(rows: list[dict[str, str]]) -> dict[str, dict[str, ob
         lambda: {
             "历史总GMV": 0.0,
             "90天GMV": 0.0,
+            "累计订单": 0.0,
+            "近90天订单": 0.0,
+            "累计视频数": 0.0,
+            "近90天视频数": 0.0,
             "店铺标签": set(),
             "粉丝量": 0.0,
             "粉丝量统计日期": None,
+            "达人名称": "",
+            "达人昵称": "",
+            "主页链接": "",
+            "达人主页标识": "",
+            "最近统计日期": "",
         }
     )
     for row in rows:
@@ -471,11 +519,26 @@ def aggregate_creator_rows(rows: list[dict[str, str]]) -> dict[str, dict[str, ob
         stat_date = parse_date(row.get("统计日期"))
         gmv = parse_number(row.get("Affiliate-attributed GMV"))
         followers = parse_number(row.get("Affiliate followers"))
+        orders = parse_number(row.get("Attributed orders"))
+        videos = parse_number(row.get("Videos"))
         group = grouped[key]
         group["历史总GMV"] += gmv
+        group["累计订单"] += orders
+        group["累计视频数"] += videos
         if stat_date and stat_date >= cutoff_90:
             group["90天GMV"] += gmv
+            group["近90天订单"] += orders
+            group["近90天视频数"] += videos
         group["店铺标签"].add(normalize_text(row.get("店铺")))
+        if stat_date:
+            date_text = stat_date.strftime("%Y-%m-%d")
+            if not normalize_text(group["最近统计日期"]) or date_text > normalize_text(group["最近统计日期"]):
+                group["最近统计日期"] = date_text
+                group["达人名称"] = normalize_text(row.get("达人名称"))
+                group["达人昵称"] = normalize_text(row.get("达人名称"))
+                handle = normalize_text(row.get("达人主页标识")) or key
+                group["达人主页标识"] = handle
+                group["主页链接"] = f"https://www.tiktok.com/@{handle.lstrip('@')}" if handle else ""
         existing_date = group.get("粉丝量统计日期")
         if followers > 0:
             if existing_date is None or (stat_date and stat_date > existing_date):
@@ -517,13 +580,26 @@ def aggregate_video_rows(rows: list[dict[str, object]]) -> tuple[dict[str, dict[
         default=datetime.now(),
     )
     cutoff_30 = latest_reference - timedelta(days=29)
+    cutoff_90 = latest_reference - timedelta(days=89)
+    cutoff_1 = latest_reference - timedelta(days=0)
     grouped: dict[str, dict[str, object]] = defaultdict(
         lambda: {
             "店铺标签": set(),
+            "近1天GMV": 0.0,
+            "近1天订单": 0.0,
+            "近1天视频数": 0.0,
             "近30天发布视频GMV": 0.0,
             "近30天订单": 0.0,
+            "近30天视频数": 0.0,
+            "近90天GMV": 0.0,
+            "近90天订单": 0.0,
+            "近90天视频数": 0.0,
+            "累计GMV": 0.0,
+            "累计订单": 0.0,
+            "累计视频数": 0.0,
             "最近视频发布时间": "",
             "最近视频发布时间_dt": None,
+            "最近出单日期": "",
             "最近统计日期": "",
         }
     )
@@ -537,14 +613,30 @@ def aggregate_video_rows(rows: list[dict[str, object]]) -> tuple[dict[str, dict[
         group["店铺标签"].add(normalize_text(row.get("店铺")))
         stat_date = row.get("_stat_date")
         post_date = row.get("_post_date")
+        gmv = row.get("_gmv", 0.0)
+        orders = row.get("_orders", 0.0)
+        group["累计GMV"] += gmv
+        group["累计订单"] += orders
+        group["累计视频数"] += 1
         if stat_date and normalize_text(group["最近统计日期"]) < stat_date.strftime("%Y-%m-%d"):
             group["最近统计日期"] = stat_date.strftime("%Y-%m-%d")
         if post_date and (group["最近视频发布时间_dt"] is None or post_date > group["最近视频发布时间_dt"]):
             group["最近视频发布时间_dt"] = post_date
             group["最近视频发布时间"] = post_date.strftime("%Y-%m-%d")
+        if post_date and orders > 0 and normalize_text(group["最近出单日期"]) < post_date.strftime("%Y-%m-%d"):
+            group["最近出单日期"] = post_date.strftime("%Y-%m-%d")
+        if post_date and post_date >= cutoff_1:
+            group["近1天GMV"] += gmv
+            group["近1天订单"] += orders
+            group["近1天视频数"] += 1
         if post_date and post_date >= cutoff_30:
-            group["近30天发布视频GMV"] += row.get("_gmv", 0.0)
-            group["近30天订单"] += row.get("_orders", 0.0)
+            group["近30天发布视频GMV"] += gmv
+            group["近30天订单"] += orders
+            group["近30天视频数"] += 1
+        if post_date and post_date >= cutoff_90:
+            group["近90天GMV"] += gmv
+            group["近90天订单"] += orders
+            group["近90天视频数"] += 1
     for key, items in videos_by_key.items():
         items.sort(key=lambda item: item.get("_post_date") or datetime.min)
     return grouped, videos_by_key, latest_reference
@@ -896,11 +988,6 @@ def update_fact_sheet(
     sheet = workbook["统一达人事实表"]
     headers = [normalize_text(cell.value) for cell in sheet[1]]
     source_to_existing, creator_ids_to_source, _ = load_creator_mapping(workbook)
-    fact_index: dict[str, int] = {}
-    for row in range(2, sheet.max_row + 1):
-        key = normalize_text(sheet.cell(row, 1).value)
-        if key:
-            fact_index[key] = row
 
     new_headers = [
         "合作表_最近合作日期",
@@ -916,37 +1003,44 @@ def update_fact_sheet(
     for header in new_headers:
         if header not in headers:
             headers.append(header)
-            sheet.cell(row=1, column=len(headers), value=header)
+            sheet.cell(row=1, column=len(headers), value=sanitize_excel_text(header))
 
+    rows: list[dict[str, object]] = []
     keys = sorted(set(creator_gmv) | set(video_agg) | set(coop_metrics))
-    next_row = sheet.max_row + 1
     for key in keys:
-        row_number = fact_index.get(key)
-        if row_number is None:
-            row_number = next_row
-            next_row += 1
-            sheet.cell(row=row_number, column=1, value=key)
-            sheet.cell(row=row_number, column=2, value=source_to_existing.get(key, ""))
-            fact_index[key] = row_number
-
         creator_stats = creator_gmv.get(key, {})
         video_stats = video_agg.get(key, {})
         coop_stats = coop_metrics.get(key, {})
         existing_id = source_to_existing.get(key, "")
         manual = remote_core_overrides.get(existing_id, {})
         values = {
+            "统一达人键": key,
+            "现有达人ID": existing_id,
+            "达人名称": creator_stats.get("达人名称", ""),
+            "达人昵称": creator_stats.get("达人昵称", ""),
+            "主页链接": creator_stats.get("主页链接", ""),
             "店铺标签": " / ".join(
                 sorted(
                     set(creator_stats.get("店铺标签", set()))
                     | set(video_stats.get("店铺标签", set()))
                 )
             ),
-            "最近统计日期": video_stats.get("最近统计日期", ""),
+            "最近统计日期": creator_stats.get("最近统计日期", "") or video_stats.get("最近统计日期", ""),
+            "近1天GMV": round(video_stats.get("近1天GMV", 0.0), 2),
+            "近1天订单": round(video_stats.get("近1天订单", 0.0), 2),
+            "近1天视频数": int(round(video_stats.get("近1天视频数", 0.0))),
             "近30天GMV": round(video_stats.get("近30天发布视频GMV", 0.0), 2),
             "近30天订单": round(video_stats.get("近30天订单", 0.0), 2),
+            "近30天视频数": int(round(video_stats.get("近30天视频数", 0.0))),
             "近90天GMV": round(creator_stats.get("90天GMV", 0.0), 2),
+            "近90天订单": round(creator_stats.get("近90天订单", 0.0), 2),
+            "近90天视频数": int(round(creator_stats.get("近90天视频数", 0.0))),
             "累计GMV": round(creator_stats.get("历史总GMV", 0.0), 2),
+            "累计订单": round(creator_stats.get("累计订单", 0.0), 2),
+            "累计视频数": int(round(creator_stats.get("累计视频数", 0.0))),
             "最近视频发布时间": video_stats.get("最近视频发布时间", ""),
+            "最近出单日期": video_stats.get("最近出单日期", ""),
+            "最近数据来源": "Creator + Videos + Cooperation",
             "合作表_最近合作日期": coop_stats.get("最近合作日期", ""),
             "合作表_当前合作状态": coop_stats.get("当前合作状态", ""),
             "合作表_近30天合作次数": coop_stats.get("近30天合作次数", ""),
@@ -958,10 +1052,8 @@ def update_fact_sheet(
             "手工_复投产品PID": parse_pid_from_text(manual.get("复投产品PID")) or parse_pid_from_text(manual.get("复投产品链接")),
             "同步状态": "已同步" if existing_id else "待映射",
         }
-        for header, value in values.items():
-            if header not in headers:
-                continue
-            sheet.cell(row=row_number, column=headers.index(header) + 1, value=value)
+        rows.append({header: values.get(header, "") for header in headers})
+    write_sheet_rows(sheet, headers, rows, start_row=3)
     return creator_ids_to_source
 
 
@@ -972,35 +1064,25 @@ def update_overview_sheet(
     coop_metrics: dict[str, dict[str, object]],
     existing_to_source: dict[str, str],
     creator_pool_tags: dict[str, dict[str, str]],
+    remote_core_overrides: dict[str, dict[str, str]],
 ) -> None:
     sheet = workbook["达人总览"]
     headers = [normalize_text(cell.value) for cell in sheet[1]]
-    creator_id_col = headers.index("达人ID") + 1
-    followers_col = headers.index("粉丝量") + 1
-    platform_col = headers.index("平台") + 1
-    type_col = headers.index("达人类型") + 1
-    total_col = headers.index("历史总GMV") + 1
-    gm90_col = headers.index("90天GMV") + 1
-    gm30_col = headers.index("近30天发布视频gmv") + 1
-    recent_col = headers.index("最近合作日期") + 1
-    status_col = headers.index("当前合作状态") + 1
-    coop30_col = headers.index("近30天合作次数") + 1
-    interval_col = headers.index("平均间隔天数") + 1
-    publish_gap_col = headers.index("距离上次发布天数") + 1
-    order_flag_col = headers.index("近30天是否出单(Y/N)") + 1
-    recoop_col = headers.index("是否进入复投(Y/N)") + 1
-    timeout_col = headers.index("是否超时未合作") + 1
-    delivery_col = headers.index("平均交付时间") + 1
-
+    level_mapping = load_level_mapping()
+    source_to_existing = {source: existing for existing, source in existing_to_source.items() if source}
     now_dt = datetime.now()
-    for row in range(4, sheet.max_row + 1):
-        creator_id = normalize_text(sheet.cell(row, creator_id_col).value)
-        if not creator_id:
-            continue
-        source_key = existing_to_source.get(creator_id, "")
+    rows: list[dict[str, object]] = []
+    keys = sorted(
+        set(creator_gmv) | set(video_agg) | set(coop_metrics),
+        key=lambda item: (-parse_number(creator_gmv.get(item, {}).get("历史总GMV")), item),
+    )
+    for source_key in keys:
+        creator_id = source_to_existing.get(source_key, source_key)
         creator_stats = creator_gmv.get(source_key, {})
         video_stats = video_agg.get(source_key, {})
         coop_stats = coop_metrics.get(source_key, {})
+        seed = creator_pool_tags.get(creator_id, {})
+        manual = remote_core_overrides.get(creator_id, {})
         latest_fee = parse_number(coop_stats.get("最近合作费用"))
         near30_video_gmv = parse_number(video_stats.get("近30天发布视频GMV"))
         latest_start = parse_date(coop_stats.get("最近合作日期"))
@@ -1015,25 +1097,44 @@ def update_overview_sheet(
                     timeout = "Y"
             elif now_dt > deadline and not normalize_text(coop_stats.get("距离上次发布天数")):
                 timeout = "Y"
-        sheet.cell(row=row, column=platform_col, value=normalize_text(sheet.cell(row, platform_col).value) or "TikTok")
-        sheet.cell(row=row, column=followers_col, value=int(round(parse_number(creator_stats.get("粉丝量")))) if parse_number(creator_stats.get("粉丝量")) > 0 else "")
-        if not normalize_text(sheet.cell(row, type_col).value) and creator_id in creator_pool_tags:
-            sheet.cell(row=row, column=type_col, value=creator_pool_tags[creator_id].get("内容一级标签", ""))
-        sheet.cell(row=row, column=total_col, value=round(creator_stats.get("历史总GMV", 0.0), 2))
-        sheet.cell(row=row, column=gm90_col, value=round(creator_stats.get("90天GMV", 0.0), 2))
-        sheet.cell(row=row, column=gm30_col, value=round(near30_video_gmv, 2))
-        sheet.cell(row=row, column=recent_col, value=coop_stats.get("最近合作日期", ""))
-        sheet.cell(row=row, column=status_col, value=coop_stats.get("当前合作状态", normalize_text(sheet.cell(row, status_col).value)))
-        sheet.cell(row=row, column=coop30_col, value=coop_stats.get("近30天合作次数", 0))
-        sheet.cell(row=row, column=interval_col, value=coop_stats.get("平均间隔天数", ""))
-        sheet.cell(row=row, column=publish_gap_col, value=coop_stats.get("距离上次发布天数", ""))
-        sheet.cell(row=row, column=order_flag_col, value="Y" if near30_video_gmv > 0 else "N")
-        sheet.cell(row=row, column=recoop_col, value="Y" if latest_fee >= 0 and near30_video_gmv > latest_fee else "N")
-        sheet.cell(row=row, column=timeout_col, value=timeout)
-        sheet.cell(row=row, column=delivery_col, value=coop_stats.get("平均交付时间", ""))
+        creator_name = normalize_text(seed.get("达人昵称")) or normalize_text(creator_stats.get("达人名称")) or creator_id
+        level = (
+            normalize_text(seed.get("合作分层"))
+            or level_mapping.get(normalize_handle(creator_id))
+            or level_mapping.get(normalize_handle(creator_name))
+            or level_mapping.get(normalize_handle(source_key))
+        )
+        rows.append(
+            {
+                "达人ID": creator_id,
+                "达人名称": creator_name,
+                "平台": normalize_text(seed.get("平台")) or "TikTok",
+                "粉丝量": int(round(parse_number(creator_stats.get("粉丝量")))) if parse_number(creator_stats.get("粉丝量")) > 0 else "",
+                "达人分层(L0/L1/L2/L3)": level,
+                "达人类型": normalize_text(seed.get("内容一级标签")),
+                "历史总GMV": round(parse_number(creator_stats.get("历史总GMV")), 2),
+                "90天GMV": round(parse_number(creator_stats.get("90天GMV")), 2),
+                "近30天发布视频gmv": round(near30_video_gmv, 2),
+                "最近合作日期": coop_stats.get("最近合作日期", ""),
+                "当前合作状态": coop_stats.get("当前合作状态", ""),
+                "近30天合作次数": coop_stats.get("近30天合作次数", 0),
+                "平均间隔天数": coop_stats.get("平均间隔天数", ""),
+                "距离上次发布天数": coop_stats.get("距离上次发布天数", ""),
+                "近30天是否出单(Y/N)": "Y" if near30_video_gmv > 0 else "N",
+                "是否进入复投(Y/N)": "Y" if near30_video_gmv > latest_fee else "N",
+                "是否超时未合作": timeout,
+                "平均交付时间": coop_stats.get("平均交付时间", ""),
+                "优先级": manual.get("优先级", ""),
+                "下一步动作": manual.get("下一步动作", ""),
+                "负责人": manual.get("负责人", ""),
+                "截止日期": manual.get("截止日期", ""),
+                "备注": manual.get("备注", normalize_text(seed.get("备注"))),
+            }
+        )
+    write_sheet_rows(sheet, headers, rows, start_row=4)
 
 
-def update_focus_sheet(workbook) -> None:
+def update_focus_sheet(workbook, creator_pool_tags: dict[str, dict[str, str]]) -> None:
     overview = workbook["达人总览"]
     focus = ensure_sheet(
         workbook,
@@ -1063,24 +1164,32 @@ def update_focus_sheet(workbook) -> None:
         ],
     )
     headers = [normalize_text(cell.value) for cell in overview[1]]
-    rows = []
+    overview_rows = []
+    overview_by_id: dict[str, dict[str, object]] = {}
     for row in overview.iter_rows(min_row=4, values_only=True):
         record = {headers[idx]: row[idx] for idx in range(min(len(headers), len(row)))}
-        if normalize_text(record.get("达人分层(L0/L1/L2/L3)")) not in {"L0", "L1"}:
+        creator_id = normalize_text(record.get("达人ID"))
+        if not creator_id:
             continue
+        overview_rows.append(record)
+        overview_by_id[creator_id] = record
+
+    rows = []
+    for creator_id, seed in creator_pool_tags.items():
+        record = overview_by_id.get(creator_id, {})
         rows.append(
             {
-                "达人ID": record.get("达人ID", ""),
-                "达人名称": record.get("达人名称", ""),
-                "平台": record.get("平台", ""),
+                "达人ID": creator_id,
+                "达人名称": record.get("达人名称", seed.get("达人昵称", creator_id)),
+                "平台": record.get("平台", seed.get("平台", "TikTok")),
                 "粉丝量": record.get("粉丝量", ""),
                 "达人分层(L0/L1/L2/L3)": record.get("达人分层(L0/L1/L2/L3)", ""),
-                "达人类型": record.get("达人类型", ""),
-                "历史总GMV": record.get("历史总GMV", ""),
-                "近30天GMV": record.get("近30天发布视频gmv", ""),
+                "达人类型": record.get("达人类型", seed.get("内容一级标签", "")),
+                "历史总GMV": record.get("历史总GMV", 0),
+                "近30天GMV": record.get("近30天发布视频gmv", 0),
                 "最近合作日期": record.get("最近合作日期", ""),
-                "当前合作状态": record.get("当前合作状态", ""),
-                "近30天合作次数": record.get("近30天合作次数", ""),
+                "当前合作状态": record.get("当前合作状态", seed.get("最近合作状态", "")),
+                "近30天合作次数": record.get("近30天合作次数", 0),
                 "平均间隔天数": record.get("平均间隔天数", ""),
                 "距离上次合作天数": record.get("距离上次发布天数", ""),
                 "是否出单(Y/N)": record.get("近30天是否出单(Y/N)", ""),
@@ -1090,7 +1199,7 @@ def update_focus_sheet(workbook) -> None:
                 "下一步动作": record.get("下一步动作", ""),
                 "负责人": record.get("负责人", ""),
                 "截止日期": record.get("截止日期", ""),
-                "备注": record.get("备注", ""),
+                "备注": record.get("备注", seed.get("备注", "")),
             }
         )
     write_sheet_rows(focus, [normalize_text(cell.value) for cell in focus[1]], rows, start_row=2)
@@ -1188,8 +1297,20 @@ def update_metrics_sheet(workbook) -> None:
     write_sheet_rows(sheet, [normalize_text(cell.value) for cell in sheet[1]], data_rows, start_row=2)
 
 
-def append_log(workbook, status: str, message: str, video_rows: int, creator_rows: int) -> None:
+def append_log(
+    workbook,
+    status: str,
+    message: str,
+    video_rows: int,
+    creator_rows: int,
+    write_meta: dict[str, str] | None = None,
+) -> None:
     sheet = workbook["同步日志"]
+    headers = [normalize_text(cell.value) for cell in sheet[1]]
+    for header in ["写回目标", "写回方式", "校验结果", "桌面发布"]:
+        if header not in headers:
+            headers.append(header)
+            sheet.cell(row=1, column=len(headers), value=sanitize_excel_text(header))
     pipeline_state = load_pipeline_state()
     last_pipeline_run = pipeline_state.get("last_pipeline_run", {})
     stores = pipeline_state.get("stores", {})
@@ -1216,24 +1337,54 @@ def append_log(workbook, status: str, message: str, video_rows: int, creator_row
             f"next={normalize_text(last_pipeline_run.get('next_sync_date'))}"
         )
     next_row = sheet.max_row + 1
-    sheet.cell(row=next_row, column=1, value=datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
+    sheet.cell(row=next_row, column=1, value=sanitize_excel_text(datetime.now().strftime("%Y-%m-%d %H:%M:%S")))
     run_mode = "自动日更同步" if last_pipeline_run else "手工导入同步"
-    sheet.cell(row=next_row, column=2, value=run_mode)
+    sheet.cell(row=next_row, column=2, value=sanitize_excel_text(run_mode))
     sheet.cell(row=next_row, column=3, value="ALL")
     sheet.cell(row=next_row, column=4, value="Videos + Creator + Cooperation")
     sheet.cell(row=next_row, column=5, value="最近可用批次")
-    sheet.cell(row=next_row, column=6, value=f"{VIDEO_CSV.name} / {CREATOR_HISTORY_CSV.name}")
+    sheet.cell(row=next_row, column=6, value=sanitize_excel_text(f"{VIDEO_CSV.name} / {CREATOR_HISTORY_CSV.name}"))
     sheet.cell(row=next_row, column=7, value="统一达人事实表 / 达人总览 / 合作映射表")
     sheet.cell(row=next_row, column=8, value=video_rows)
     sheet.cell(row=next_row, column=9, value=creator_rows)
-    sheet.cell(row=next_row, column=10, value=status)
-    sheet.cell(row=next_row, column=11, value=" | ".join(part for part in [message, pipeline_text, summary_text] if part))
+    sheet.cell(row=next_row, column=10, value=sanitize_excel_text(status))
+    sheet.cell(
+        row=next_row,
+        column=11,
+        value=sanitize_excel_text(" | ".join(part for part in [message, pipeline_text, summary_text] if part)),
+    )
+    if write_meta:
+        sheet.cell(row=next_row, column=headers.index("写回目标") + 1, value=sanitize_excel_text(write_meta.get("write_target", "")))
+        sheet.cell(row=next_row, column=headers.index("写回方式") + 1, value=sanitize_excel_text(write_meta.get("write_mode", "")))
+        sheet.cell(row=next_row, column=headers.index("校验结果") + 1, value=sanitize_excel_text(write_meta.get("validation_result", "")))
+        sheet.cell(row=next_row, column=headers.index("桌面发布") + 1, value=sanitize_excel_text(write_meta.get("desktop_publish", "")))
+
+
+def finalize_last_log_write_meta(path: Path, write_meta: dict[str, str]) -> None:
+    workbook = load_workbook(path)
+    sheet = workbook["同步日志"]
+    headers = [normalize_text(cell.value) for cell in sheet[1]]
+    last_row = sheet.max_row
+    if last_row < 3:
+        workbook.close()
+        return
+    mapping = {
+        "写回目标": write_meta.get("write_target", ""),
+        "写回方式": write_meta.get("write_mode", ""),
+        "校验结果": write_meta.get("validation_result", ""),
+        "桌面发布": write_meta.get("desktop_publish", ""),
+    }
+    for header, value in mapping.items():
+        if header not in headers:
+            headers.append(header)
+            sheet.cell(row=1, column=len(headers), value=sanitize_excel_text(header))
+        sheet.cell(row=last_row, column=headers.index(header) + 1, value=sanitize_excel_text(value))
+    result = save_workbook_safely(workbook, publish_desktop=True)
+    workbook.close()
+    print(f"finalized sync log: {result}")
 
 
 def main() -> None:
-    if not WORKBOOK_PATH.exists():
-        raise SystemExit(f"missing workbook: {WORKBOOK_PATH}")
-
     video_rows_raw = load_csv(VIDEO_CSV)
     creator_rows_raw = dedupe_creator_rows()
     creator_pool_tags = load_creator_pool_tags()
@@ -1244,7 +1395,15 @@ def main() -> None:
     video_agg, videos_by_key, latest_video_ref = aggregate_video_rows(video_rows)
     creator_gmv = aggregate_creator_rows(creator_rows_raw)
 
-    workbook = load_workbook(WORKBOOK_PATH)
+    if SOURCE_WORKBOOK.exists():
+        workbook = load_workbook(SOURCE_WORKBOOK)
+    else:
+        workbook = Workbook()
+        if workbook.active:
+            workbook.active.title = "达人总览"
+    build_notes_sheet(workbook)
+    build_sync_sheets(workbook)
+    seed_creator_mapping(workbook)
     source_to_existing, existing_to_source, existing_to_name = load_creator_mapping(workbook)
     coop_rows, mapping_rows, candidate_rows = load_cooperation_rows(
         set(creator_gmv) | set(video_agg),
@@ -1287,9 +1446,17 @@ def main() -> None:
     refresh_raw_sheet(workbook, "人工维护快照", MANUAL_SNAPSHOT_HEADERS, manual_snapshot_rows, start_row=2)
 
     existing_to_source = update_fact_sheet(workbook, creator_gmv, video_agg, coop_metrics, remote_core_overrides)
-    update_overview_sheet(workbook, creator_gmv, video_agg, coop_metrics, existing_to_source, creator_pool_tags)
+    update_overview_sheet(
+        workbook,
+        creator_gmv,
+        video_agg,
+        coop_metrics,
+        existing_to_source,
+        creator_pool_tags,
+        remote_core_overrides,
+    )
     refresh_raw_sheet(workbook, "合作记录明细", RECORD_HEADERS, record_rows, start_row=2)
-    update_focus_sheet(workbook)
+    update_focus_sheet(workbook, creator_pool_tags)
     update_metrics_sheet(workbook)
 
     append_log(
@@ -1298,9 +1465,17 @@ def main() -> None:
         message=f"videos={len(video_rows_raw)}, creators={len(creator_rows_raw)}, coop={len(coop_rows)}, product={len(product_rows)}",
         video_rows=len(video_rows_raw),
         creator_rows=len(creator_rows_raw),
+        write_meta={
+            "write_target": f"{INTERNAL_WORKBOOK_PATH} -> {DESKTOP_WORKBOOK_PATH}",
+            "write_mode": "staging-validate-atomic-replace",
+            "validation_result": "待校验",
+            "desktop_publish": "待发布",
+        },
     )
-    workbook.save(WORKBOOK_PATH)
+    result = save_workbook_safely(workbook, publish_desktop=True)
+    finalize_last_log_write_meta(INTERNAL_WORKBOOK_PATH, result)
     print(f"synced {WORKBOOK_PATH}")
+    print(result)
 
 
 if __name__ == "__main__":

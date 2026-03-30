@@ -2,13 +2,16 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import subprocess
+import time
 import urllib.error
 import urllib.request
 from datetime import date, timedelta
 from pathlib import Path
 from typing import Any
 
+from workbook_io import INTERNAL_WORKBOOK_PATH
 
 BASE_DIR = Path(__file__).resolve().parent
 CONFIG_PATH = BASE_DIR / "store_config.json"
@@ -23,7 +26,8 @@ CHROME_BRIDGE_DIR = BASE_DIR.parent / "chrome_bridge"
 CHROME_DEBUG_SCRIPT = CHROME_BRIDGE_DIR / "start_chrome_debug.sh"
 STORE_PROFILE_SCRIPT = CHROME_BRIDGE_DIR / "start_store_profile.sh"
 STATE_PATH = BASE_DIR / "data" / "pipeline_state.json"
-WORKBOOK_PATH = Path("/Users/apple/Desktop/达人多次合作监控看板_同步版.xlsx")
+WORKBOOK_PATH = INTERNAL_WORKBOOK_PATH
+ANSI_ESCAPE_RE = re.compile(r"\x1B\[[0-?]*[ -/]*[@-~]")
 
 
 def load_config() -> dict:
@@ -72,14 +76,30 @@ def endpoint_ready(port: int) -> bool:
     url = f"http://127.0.0.1:{port}/json/version"
     try:
         with urllib.request.urlopen(url, timeout=3) as response:
-            return response.status == 200
+            if response.status != 200:
+                return False
+            payload = json.loads(response.read().decode("utf-8"))
+            return bool(payload.get("webSocketDebuggerUrl"))
     except (urllib.error.URLError, TimeoutError, ConnectionError, ValueError):
         return False
 
 
+def wait_for_stable_endpoint(port: int, attempts: int = 20, delay_seconds: float = 1.0) -> bool:
+    stable_hits = 0
+    for _ in range(attempts):
+        if endpoint_ready(port):
+            stable_hits += 1
+            if stable_hits >= 2:
+                return True
+        else:
+            stable_hits = 0
+        time.sleep(delay_seconds)
+    return False
+
+
 def launch_profile_for_store(store: dict[str, Any]) -> None:
     port = int(store["profile_port"])
-    if endpoint_ready(port):
+    if wait_for_stable_endpoint(port, attempts=2, delay_seconds=0.5):
         print(f"[browser] {store['store_tag']}: profile ready on {port}")
         return
 
@@ -97,7 +117,7 @@ def launch_profile_for_store(store: dict[str, Any]) -> None:
         cmd = ["zsh", str(STORE_PROFILE_SCRIPT), store_key, str(port)]
 
     run(cmd)
-    if not endpoint_ready(port):
+    if not wait_for_stable_endpoint(port, attempts=25, delay_seconds=1.0):
         raise RuntimeError(f"{store['store_tag']} 浏览器 profile 启动后仍未就绪: port={port}")
     print(f"[browser] {store['store_tag']}: launched profile on {port}")
 
@@ -169,7 +189,9 @@ def parse_args() -> argparse.Namespace:
 
 
 def summarize_error(error: Exception) -> str:
-    text = str(error).strip()
+    text = ANSI_ESCAPE_RE.sub("", str(error))
+    text = text.replace("\r", "\n")
+    text = re.sub(r"\n{3,}", "\n\n", text).strip()
     return text or error.__class__.__name__
 
 
@@ -235,6 +257,7 @@ def main() -> None:
     args = parse_args()
     config = load_config()
     state = load_state()
+    previous_success_run_at = str(state.get("last_pipeline_run", {}).get("last_success_run_at") or "")
 
     if args.force_rebuild or (not args.skip_rebuild and not WORKBOOK_PATH.exists()):
         run(["python3", str(BUILD_SCRIPT)])
@@ -414,19 +437,50 @@ def main() -> None:
             print(f"[error] {store_tag}: {message}")
             continue
 
+    pre_rebuild_summary = pipeline_summary(state)
     state["last_pipeline_run"] = {
         "run_at": run_date,
-        **pipeline_summary(state),
+        **pre_rebuild_summary,
+        "dashboard_rebuilt": False,
+        "rebuild_error": "",
+        "overall_status": "pending_rebuild",
     }
     save_state(state)
 
-    run(["python3", str(SYNC_SCRIPT)])
-    run(["python3", str(DASHBOARD_BUILD_SCRIPT)])
+    try:
+        run(["python3", str(SYNC_SCRIPT)])
+        run(["python3", str(DASHBOARD_BUILD_SCRIPT)])
+    except Exception as error:
+        state["last_pipeline_run"] = {
+            "run_at": run_date,
+            **pipeline_summary(state),
+            "dashboard_rebuilt": False,
+            "rebuild_error": summarize_error(error),
+            "overall_status": "rebuild_failed",
+            "last_success_run_at": previous_success_run_at,
+        }
+        save_state(state)
+        raise
+
+    final_summary = pipeline_summary(state)
+    total_stores = len(selected_stores)
+    succeeded_or_waiting = final_summary.get("success", 0) + final_summary.get("waiting", 0)
+    if total_stores and succeeded_or_waiting == total_stores and final_summary.get("failed", 0) == 0:
+        overall_status = "success"
+    elif final_summary.get("failed", 0) > 0:
+        overall_status = "partial_failure"
+    else:
+        overall_status = "partial_success"
+
+    last_success_run_at = run_date if overall_status == "success" else (final_summary.get("last_success_run_at") or previous_success_run_at)
 
     state["last_pipeline_run"] = {
         "run_at": run_date,
-        **pipeline_summary(state),
+        **final_summary,
         "dashboard_rebuilt": True,
+        "rebuild_error": "",
+        "overall_status": overall_status,
+        "last_success_run_at": last_success_run_at,
     }
     save_state(state)
 
