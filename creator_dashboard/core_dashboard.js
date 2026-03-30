@@ -349,7 +349,8 @@ function filteredFocus() {
 }
 
 function filteredRecords() {
-  const ids = new Set(filteredOverview().map((item) => item["达人ID"]));
+  const sourceRows = state.activeTab === "focus" ? filteredFocus() : filteredOverview();
+  const ids = new Set(sourceRows.map((item) => item["达人ID"]));
   return payload.records.filter((item) => ids.has(item["达人ID"]));
 }
 
@@ -359,9 +360,10 @@ function renderStats(overviewRows, focusRows) {
   const timeout = activeRows.filter((item) => item["是否超时未合作"] === "Y").length;
   const repurchase = activeRows.filter((item) => item["是否进入复投(Y/N)"] === "Y").length;
   const cards = [
-    { label: "当前达人", value: overviewRows.length, note: `全量 Creator / 总池 ${renderedOverview.length}` },
-    { label: "重点池人数", value: focusRows.length, note: `固定 189 池 / 缺失 ${payload.stats.missingFocusCount || 0}` },
-    { label: "高优先级", value: highPriority, note: state.activeTab === "focus" ? "当前重点池筛选结果" : "当前总览筛选结果" },
+    { label: "全量池数量", value: payload.stats.overviewCount || 0, note: "后台记录的 Creator 全量唯一达人数量" },
+    { label: "189重点池人数", value: focusRows.length, note: `固定 189 池 / 缺失 ${payload.stats.missingFocusCount || 0}` },
+    { label: "GMV重点池人数", value: overviewRows.length, note: `90天GMV > 0 / 总池 ${payload.stats.gmvFocusCount || renderedOverview.length}` },
+    { label: "高优先级", value: highPriority, note: state.activeTab === "focus" ? "当前 189 重点池筛选结果" : "当前 GMV重点池筛选结果" },
     { label: "复投 / 超时", value: `${repurchase} / ${timeout}`, note: "当前筛选结果" },
   ];
   elements.statsGrid.innerHTML = cards
@@ -430,8 +432,8 @@ function getProfileUrl(row) {
 
 function renderOverview() {
   const rows = filteredOverview();
-  elements.resultTitle.textContent = `${rows.length} 个 Creator 达人`;
-  elements.resultSubtitle.textContent = `展示全量唯一 Creator 聚合结果，重点池单独维护为 189 人`;
+  elements.resultTitle.textContent = `${rows.length} 个 GMV重点达人`;
+  elements.resultSubtitle.textContent = `只展示 90天GMV 大于 0 的达人；全量池仅在后台保留数量和明细`;
   renderTableHead(elements.overviewHead);
   const pageData = paginateRows(rows, state.overviewPage, OVERVIEW_PAGE_SIZE);
   state.overviewPage = pageData.page;
@@ -937,7 +939,7 @@ async function init() {
   updateSyncInputs();
   window.setTimeout(updateSyncInputs, 0);
 
-  baseOverview = payload.overview.map((item) => ({ ...item }));
+  baseOverview = (payload.gmvFocusPool || []).map((item) => ({ ...item }));
   baseFocus = payload.focusPool.map((item) => ({ ...item }));
   try {
     await loadRemoteOverrides();

@@ -643,8 +643,11 @@ def build_payload() -> dict[str, object]:
             missing_focus_ids.append(creator_id)
         focus_rows.append(focus_row)
 
+    gmv_focus_rows = [row for row in overview_rows if normalize_number(row.get("90天GMV")) > 0]
+
     assumptions = [
-        "达人总览已切到 Creator 全量唯一达人聚合，一行一达人；重点达人池固定读取既有 189 人集合。",
+        "全量池继续保留在后台作为 Creator 全量唯一达人聚合真源，但前台不再直接展示全量明细。",
+        "GMV重点池按 90天GMV > 0 自动生成，每次日更重建后会自动重新判定是否入池。",
         "品牌标签为独立运营字段，当前按历史视频实际带货的店铺品牌累计生成，并补充手工产品链接/PID可识别出的品牌。",
         "核心达人类型继续沿用既有 189 人标签结果；未命中全量 Creator 的达人类型允许为空，不自动补打新标签。",
         "GMV 与合作公式继续沿用当前同步版工作簿口径，本轮不重算业务规则。",
@@ -652,6 +655,7 @@ def build_payload() -> dict[str, object]:
 
     stats = {
         "overviewCount": len(overview_rows),
+        "gmvFocusCount": len(gmv_focus_rows),
         "focusCount": len(focus_rows),
         "recordCount": len(record_rows),
         "highPriorityCount": sum(1 for row in focus_rows if normalize_text(row.get("优先级")) == "高"),
@@ -668,6 +672,7 @@ def build_payload() -> dict[str, object]:
         "stats": stats,
         "syncHealth": sync_health,
         "overview": [{header: row.get(header, "") for header in OVERVIEW_HEADERS} | {"主页链接": row.get("主页链接", ""), "统一达人键": row.get("统一达人键", "")} for row in overview_rows],
+        "gmvFocusPool": [{header: row.get(header, "") for header in OVERVIEW_HEADERS} | {"主页链接": row.get("主页链接", ""), "统一达人键": row.get("统一达人键", "")} for row in gmv_focus_rows],
         "focusPool": [{header: row.get(header, "") for header in FOCUS_HEADERS} | {"主页链接": row.get("主页链接", ""), "统一达人键": row.get("统一达人键", "")} for row in focus_rows],
         "records": record_rows,
         "metrics": metrics,
