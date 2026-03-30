@@ -119,6 +119,26 @@
             </div>
             <p id="core-sync-status" class="editor-meta">默认读取共享云端数据；填写编辑人和口令后可保存人工维护字段。</p>
           </section>
+
+          <section class="panel">
+            <div class="panel__header">
+              <p class="panel__eyebrow">Upload</p>
+              <h2>表格上传</h2>
+            </div>
+            <label class="field">
+              <span>达人合作表格</span>
+              <input id="coop-upload-input" type="file" accept=".xlsx,.xls,.csv" />
+            </label>
+            <button class="ghost-button upload-button" id="coop-upload-button" type="button">上传合作表到云端</button>
+            <label class="field">
+              <span>SPU / SKU 对应表格</span>
+              <input id="sku-upload-input" type="file" accept=".xlsx,.xls,.csv" />
+            </label>
+            <button class="ghost-button upload-button" id="sku-upload-button" type="button">上传 SPU/SKU 表到云端</button>
+            <p id="upload-status" class="editor-meta">
+              上传成功后，后续日更和工作簿重建会优先读取云端合作表与产品表。
+            </p>
+          </section>
         </aside>
 
         <section class="content">
@@ -222,6 +242,7 @@
       </div>
     </dialog>
 
+    <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
     <script src="./data/core_creator_dashboard.js"></script>
     <script src="./core_dashboard.js" type="module"></script>
   </body>

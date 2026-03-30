@@ -206,7 +206,8 @@ body::before {
 }
 
 .field input,
-.field select {
+.field select,
+.field textarea {
   appearance: none;
   width: 100%;
   border: 1px solid var(--line);
@@ -218,9 +219,21 @@ body::before {
 }
 
 .field input:focus,
-.field select:focus {
+.field select:focus,
+.field textarea:focus {
   outline: 2px solid rgba(202, 90, 52, 0.18);
   border-color: rgba(202, 90, 52, 0.35);
+}
+
+.field textarea {
+  min-height: 92px;
+  resize: vertical;
+  font-family: inherit;
+}
+
+.upload-button {
+  width: 100%;
+  margin-bottom: 16px;
 }
 
 .grid-two {

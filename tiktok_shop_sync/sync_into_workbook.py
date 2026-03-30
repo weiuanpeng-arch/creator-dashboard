@@ -9,7 +9,7 @@ from collections import defaultdict
 from datetime import datetime, timedelta
 from difflib import SequenceMatcher
 from pathlib import Path
-from urllib.error import URLError
+from urllib.error import HTTPError, URLError
 from urllib.parse import quote
 from urllib.request import Request, urlopen
 
@@ -293,6 +293,77 @@ def resolve_coop_xlsx() -> Path:
     raise FileNotFoundError(f"未找到合作表: {COOP_XLSX_NAME}")
 
 
+def load_cloud_cooperation_input_rows() -> list[dict[str, object]]:
+    workspace = quote(PUBLIC_READ_SYNC_SETTINGS["workspace_id"], safe="")
+    try:
+        rows = supabase_request(
+            f"/tiktok_cooperation_raw?workspace_id=eq.{workspace}&select=cooperation_id,kol_id,platform,cooperation_type,start_at,end_at,is_joint_post,sample_type,shipping_channel,cooperation_attribute,cooperation_fee,prepaid_fee,commission_rate,shipping_address,live_minutes,product_spu_list,created_at_source,updated_at_source,created_by_source,status&order=cooperation_id.asc"
+        )
+    except (URLError, HTTPError):
+        return []
+    mapped: list[dict[str, object]] = []
+    for row in rows or []:
+        mapped.append(
+            {
+                "合作ID": normalize_text(row.get("cooperation_id")),
+                "kolId": normalize_text(row.get("kol_id")),
+                "平台": normalize_text(row.get("platform")),
+                "合作类型": normalize_text(row.get("cooperation_type")),
+                "开始时间": normalize_text(row.get("start_at")),
+                "结束时间": normalize_text(row.get("end_at")),
+                "是否为Joint Post合作": normalize_text(row.get("is_joint_post")),
+                "样品类型": normalize_text(row.get("sample_type")),
+                "发货渠道": normalize_text(row.get("shipping_channel")),
+                "合作属性": normalize_text(row.get("cooperation_attribute")),
+                "合作费用": normalize_text(row.get("cooperation_fee")),
+                "预付费用": normalize_text(row.get("prepaid_fee")),
+                "佣金比例": normalize_text(row.get("commission_rate")),
+                "收获地址": normalize_text(row.get("shipping_address")),
+                "直播分钟数": normalize_text(row.get("live_minutes")),
+                "合作商品SPU，以 / 分割": normalize_text(row.get("product_spu_list")),
+                "创建时间": normalize_text(row.get("created_at_source")),
+                "更新时间": normalize_text(row.get("updated_at_source")),
+                "创建人": normalize_text(row.get("created_by_source")),
+                "状态": normalize_text(row.get("status")),
+            }
+        )
+    return mapped
+
+
+def load_cooperation_input_rows() -> list[dict[str, object]]:
+    cloud_rows = load_cloud_cooperation_input_rows()
+    if cloud_rows:
+        return cloud_rows
+    workbook = load_workbook(resolve_coop_xlsx(), read_only=True, data_only=True)
+    sheet = workbook[workbook.sheetnames[0]]
+    headers = [normalize_text(cell.value) for cell in sheet[1]]
+    rows: list[dict[str, object]] = []
+    for values in sheet.iter_rows(min_row=2, values_only=True):
+        rows.append({headers[idx]: values[idx] for idx in range(min(len(headers), len(values)))})
+    workbook.close()
+    return rows
+
+
+def load_cloud_sku_mapping_rows() -> list[dict[str, str]]:
+    workspace = quote(PUBLIC_READ_SYNC_SETTINGS["workspace_id"], safe="")
+    try:
+        rows = supabase_request(
+            f"/tiktok_product_sku_cost_raw?workspace_id=eq.{workspace}&select=spu,sku,cost,country_code&order=spu.asc,sku.asc"
+        )
+    except (URLError, HTTPError):
+        return []
+    return [
+        {
+            "spu": normalize_text(row.get("spu")),
+            "sku": normalize_text(row.get("sku")).upper(),
+            "cost": normalize_text(row.get("cost")),
+            "country_code": normalize_text(row.get("country_code")).upper(),
+        }
+        for row in (rows or [])
+        if normalize_text(row.get("spu")) and normalize_text(row.get("sku"))
+    ]
+
+
 def load_pipeline_state() -> dict:
     if not STATE_PATH.exists():
         return {}
@@ -428,13 +499,19 @@ def load_creator_mapping(workbook) -> tuple[dict[str, str], dict[str, str], dict
 
 
 def load_sku_mapping() -> tuple[dict[str, set[str]], dict[str, str], list[str], list[str]]:
-    workbook = load_workbook(SKU_XLSX, read_only=True, data_only=True)
-    sheet = workbook[workbook.sheetnames[0]]
     spu_to_skus: dict[str, set[str]] = defaultdict(set)
     sku_to_spu: dict[str, str] = {}
     all_spus: set[str] = set()
     all_skus: set[str] = set()
-    for row in sheet.iter_rows(min_row=2, values_only=True):
+    cloud_rows = load_cloud_sku_mapping_rows()
+    if cloud_rows:
+        raw_rows = [(row.get("spu"), row.get("sku")) for row in cloud_rows]
+    else:
+        workbook = load_workbook(SKU_XLSX, read_only=True, data_only=True)
+        sheet = workbook[workbook.sheetnames[0]]
+        raw_rows = list(sheet.iter_rows(min_row=2, values_only=True))
+        workbook.close()
+    for row in raw_rows:
         spu = normalize_text(row[0])
         sku = normalize_text(row[1]).upper()
         if not spu or not sku:
@@ -714,9 +791,6 @@ def load_cooperation_rows(
     existing_to_name: dict[str, str],
     spu_to_skus: dict[str, set[str]],
 ) -> tuple[list[dict[str, object]], list[dict[str, object]], list[dict[str, object]]]:
-    workbook = load_workbook(resolve_coop_xlsx(), read_only=True, data_only=True)
-    sheet = workbook[workbook.sheetnames[0]]
-    headers = [normalize_text(cell.value) for cell in sheet[1]]
     exact_source, exact_existing, clean_to_source, bucket_to_clean = build_matchers(
         source_keys, source_to_existing, existing_to_source
     )
@@ -724,8 +798,7 @@ def load_cooperation_rows(
     mapping_rows: dict[str, dict[str, object]] = {}
     candidate_rows: list[dict[str, object]] = []
     coop_rows: list[dict[str, object]] = []
-    for values in sheet.iter_rows(min_row=2, values_only=True):
-        row = {headers[idx]: values[idx] for idx in range(min(len(headers), len(values)))}
+    for row in load_cooperation_input_rows():
         raw_kol = normalize_text(row.get("kolId"))
         matched_key, method, confidence = match_creator_key(
             raw_kol, exact_source, exact_existing, clean_to_source, bucket_to_clean

@@ -91,6 +91,11 @@ const elements = {
   coreRefreshCloud: document.querySelector("#core-refresh-cloud"),
   coreClearSync: document.querySelector("#core-clear-sync"),
   coreSyncStatus: document.querySelector("#core-sync-status"),
+  coopUploadInput: document.querySelector("#coop-upload-input"),
+  coopUploadButton: document.querySelector("#coop-upload-button"),
+  skuUploadInput: document.querySelector("#sku-upload-input"),
+  skuUploadButton: document.querySelector("#sku-upload-button"),
+  uploadStatus: document.querySelector("#upload-status"),
   detailModal: document.querySelector("#core-detail-modal"),
   detailTitle: document.querySelector("#core-detail-title"),
   detailSubtitle: document.querySelector("#core-detail-subtitle"),
@@ -198,6 +203,12 @@ function setSyncStatus(text) {
   elements.coreSyncStatus.textContent = text;
 }
 
+function setUploadStatus(text) {
+  if (elements.uploadStatus) {
+    elements.uploadStatus.textContent = text;
+  }
+}
+
 function formatSyncError(error) {
   const message = String(error?.message || error || "").trim();
   if (!message) {
@@ -256,6 +267,85 @@ function extractCoreFields(fields = {}) {
     extracted["复投产品PID"] = parsePidFromText(extracted["复投产品链接"]);
   }
   return extracted;
+}
+
+function canWriteShared() {
+  return Boolean(syncSettings.editorName && syncSettings.writePasscode);
+}
+
+function ensureXlsxReady() {
+  if (!window.XLSX) {
+    throw new Error("页面还没有加载完成，请刷新后重试。");
+  }
+}
+
+function readFileAsArrayBuffer(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result);
+    reader.onerror = () => reject(new Error("读取文件失败"));
+    reader.readAsArrayBuffer(file);
+  });
+}
+
+async function parseWorkbookRows(file) {
+  ensureXlsxReady();
+  const buffer = await readFileAsArrayBuffer(file);
+  const workbook = window.XLSX.read(buffer, { type: "array" });
+  const sheet = workbook.Sheets[workbook.SheetNames[0]];
+  return window.XLSX.utils.sheet_to_json(sheet, { defval: "" });
+}
+
+function normalizeCooperationUploadRows(rows) {
+  return rows
+    .map((row) => ({
+      cooperation_id: String(row["合作ID"] || "").trim(),
+      kol_id: String(row["kolId"] || "").trim(),
+      platform: String(row["平台"] || "").trim(),
+      cooperation_type: String(row["合作类型"] || "").trim(),
+      start_at: String(row["开始时间"] || "").trim(),
+      end_at: String(row["结束时间"] || "").trim(),
+      is_joint_post: String(row["是否为Joint Post合作"] || "").trim(),
+      sample_type: String(row["样品类型"] || "").trim(),
+      shipping_channel: String(row["发货渠道"] || "").trim(),
+      cooperation_attribute: String(row["合作属性"] || "").trim(),
+      cooperation_fee: String(row["合作费用"] || "").trim(),
+      prepaid_fee: String(row["预付费用"] || "").trim(),
+      commission_rate: String(row["佣金比例"] || "").trim(),
+      shipping_address: String(row["收获地址"] || "").trim(),
+      live_minutes: String(row["直播分钟数"] || "").trim(),
+      product_spu_list: String(row["合作商品SPU，以 / 分割"] || "").trim(),
+      created_at_source: String(row["创建时间"] || "").trim(),
+      updated_at_source: String(row["更新时间"] || "").trim(),
+      created_by_source: String(row["创建人"] || "").trim(),
+      status: String(row["状态"] || "").trim(),
+    }))
+    .filter((row) => row.cooperation_id || row.kol_id);
+}
+
+function normalizeSkuUploadRows(rows) {
+  return rows
+    .map((row) => ({
+      spu: String(row["spu"] || row["SPU"] || "").trim(),
+      sku: String(row["sku"] || row["SKU"] || "").trim().toUpperCase(),
+      cost: String(row["cost"] || row["COST"] || "").trim(),
+      country_code: String(row["country_code"] || row["country code"] || row["COUNTRY_CODE"] || "").trim().toUpperCase(),
+    }))
+    .filter((row) => row.spu && row.sku);
+}
+
+async function replaceCloudUpload(functionName, fileName, rows) {
+  return supabaseRequest(`/rpc/${functionName}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      p_workspace_id: syncSettings.workspaceId,
+      p_passcode: syncSettings.writePasscode,
+      p_editor_name: syncSettings.editorName,
+      p_source_file: fileName,
+      p_rows: rows,
+    }),
+  });
 }
 
 async function loadRemoteOverrides() {
@@ -925,6 +1015,61 @@ function setupSyncPanel() {
   });
 }
 
+async function handleCooperationUpload() {
+  if (!canWriteShared()) {
+    setUploadStatus("请先填写编辑人和写入口令，再上传合作表到云端。");
+    return;
+  }
+  const file = elements.coopUploadInput.files?.[0];
+  if (!file) {
+    setUploadStatus("请先选择达人合作表格。");
+    return;
+  }
+  try {
+    setUploadStatus("正在解析合作表并上传到云端...");
+    const rows = normalizeCooperationUploadRows(await parseWorkbookRows(file));
+    if (!rows.length) {
+      throw new Error("合作表没有可上传的数据，请检查表头是否正确。");
+    }
+    const result = await replaceCloudUpload("replace_tiktok_cooperation_upload", file.name, rows);
+    setUploadStatus(`合作表上传完成：${result?.inserted || rows.length} 行已同步到云端，后续更新会优先读取云端合作表。`);
+  } catch (error) {
+    setUploadStatus(`合作表上传失败：${formatSyncError(error)}`);
+  }
+}
+
+async function handleSkuUpload() {
+  if (!canWriteShared()) {
+    setUploadStatus("请先填写编辑人和写入口令，再上传 SPU/SKU 表到云端。");
+    return;
+  }
+  const file = elements.skuUploadInput.files?.[0];
+  if (!file) {
+    setUploadStatus("请先选择 SPU / SKU 对应表格。");
+    return;
+  }
+  try {
+    setUploadStatus("正在解析 SPU/SKU 表并上传到云端...");
+    const rows = normalizeSkuUploadRows(await parseWorkbookRows(file));
+    if (!rows.length) {
+      throw new Error("SPU/SKU 表没有可上传的数据，请检查表头是否正确。");
+    }
+    const result = await replaceCloudUpload("replace_tiktok_product_sku_cost_upload", file.name, rows);
+    setUploadStatus(`SPU/SKU 表上传完成：${result?.inserted || rows.length} 行已同步到云端，后续更新会优先读取云端产品表。`);
+  } catch (error) {
+    setUploadStatus(`SPU/SKU 表上传失败：${formatSyncError(error)}`);
+  }
+}
+
+function setupUploadPanel() {
+  elements.coopUploadButton?.addEventListener("click", () => {
+    handleCooperationUpload();
+  });
+  elements.skuUploadButton?.addEventListener("click", () => {
+    handleSkuUpload();
+  });
+}
+
 async function init() {
   if (window.__CORE_CREATOR_DASHBOARD__) {
     payload = window.__CORE_CREATOR_DASHBOARD__;
@@ -955,6 +1100,7 @@ async function init() {
   setupTabs();
   setupFilters();
   setupSyncPanel();
+  setupUploadPanel();
   elements.closeModal.addEventListener("click", () => elements.detailModal.close());
   render();
 }
