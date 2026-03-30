@@ -92,6 +92,7 @@ BRAND_ALIAS_MAP = {
 CREATOR_RAW_COLUMNS = [
     "stat_date",
     "store_tag",
+    "range_label",
     "creator_name",
     "creator_handle",
     "creator_key",
@@ -127,9 +128,16 @@ def normalize_text(value: object) -> str:
 
 
 def normalize_number(value: object) -> float:
-    text = normalize_text(value).replace(",", "")
+    text = normalize_text(value)
     if not text:
         return 0.0
+    text = text.replace("Rp", "").replace("rp", "").replace(" ", "")
+    if "," in text and "." in text:
+        text = text.replace(".", "").replace(",", ".")
+    else:
+        text = text.replace(",", "")
+        if text.count(".") > 1:
+            text = text.replace(".", "")
     try:
         return float(text)
     except ValueError:
@@ -160,6 +168,22 @@ def parse_date(value: object) -> datetime | None:
         except ValueError:
             continue
     return None
+
+
+def parse_range_span_days(value: object) -> int:
+    text = normalize_text(value)
+    if not text:
+        return 0
+    if text.endswith("单日"):
+        return 1
+    match = re.search(r"(\d{4}-\d{2}-\d{2})至(\d{4}-\d{2}-\d{2})", text)
+    if not match:
+        return 0
+    start = parse_date(match.group(1))
+    end = parse_date(match.group(2))
+    if not start or not end:
+        return 0
+    return max((end - start).days + 1, 0)
 
 
 def sheet_headers(worksheet) -> list[str]:
@@ -208,13 +232,14 @@ def supabase_request_json(path: str, headers: dict[str, str] | None = None) -> t
         return payload, dict(response.headers.items())
 
 
-def fetch_supabase_rows(table: str, columns: list[str], page_size: int = REST_PAGE_SIZE) -> list[dict[str, object]]:
+def fetch_supabase_rows(table: str, columns: list[str], page_size: int = REST_PAGE_SIZE, extra_query: str = "") -> list[dict[str, object]]:
     encoded_select = quote(",".join(columns), safe=",")
+    query_suffix = f"&{extra_query}" if extra_query else ""
     offset = 0
     rows: list[dict[str, object]] = []
     while True:
         batch, _headers = supabase_request_json(
-            f"/{table}?select={encoded_select}",
+            f"/{table}?select={encoded_select}{query_suffix}",
             headers={
                 "Range-Unit": "items",
                 "Range": f"{offset}-{offset + page_size - 1}",
@@ -383,13 +408,55 @@ def build_raw_creator_meta(workbook) -> tuple[dict[str, dict[str, object]], set[
 
 
 def build_db_creator_rollup() -> tuple[dict[str, dict[str, object]], dict[str, dict[str, object]], set[str]]:
-    rows = fetch_supabase_rows("tiktok_creator_performance_raw", CREATOR_RAW_COLUMNS)
-    latest_stat = max((parse_date(row.get("stat_date")) for row in rows if parse_date(row.get("stat_date"))), default=datetime.now())
-    cutoff_90 = latest_stat - timedelta(days=89)
+    ninety_range = quote("2025-12-26至2026-03-24", safe="")
+    baseline_rows = fetch_supabase_rows(
+        "tiktok_creator_performance_raw",
+        CREATOR_RAW_COLUMNS,
+        extra_query=f"stat_date=eq.2026-03-24&range_label=eq.{ninety_range}",
+    )
+    single_day_label = quote("*单日", safe="*")
+    daily_rows = fetch_supabase_rows(
+        "tiktok_creator_performance_raw",
+        CREATOR_RAW_COLUMNS,
+        extra_query=f"range_label=like.{single_day_label}",
+    )
+    raw_rows = baseline_rows + daily_rows
+    if not raw_rows:
+        raw_rows = fetch_supabase_rows("tiktok_creator_performance_raw", CREATOR_RAW_COLUMNS)
+
+    deduped_rows_by_store_date_key: dict[tuple[str, str, str], dict[str, object]] = {}
+    for row in raw_rows:
+        store_tag = normalize_text(row.get("store_tag"))
+        stat_date_text = normalize_text(row.get("stat_date"))
+        key = normalize_text(row.get("creator_key"))
+        if not store_tag or not stat_date_text or not key:
+            continue
+        dedupe_key = (store_tag, stat_date_text, key)
+        existing = deduped_rows_by_store_date_key.get(dedupe_key)
+        if existing is None:
+            deduped_rows_by_store_date_key[dedupe_key] = row
+            continue
+        candidate_score = (
+            parse_range_span_days(row.get("range_label")),
+            normalize_number(row.get("affiliate_gmv")),
+            normalize_number(row.get("videos")),
+        )
+        existing_score = (
+            parse_range_span_days(existing.get("range_label")),
+            normalize_number(existing.get("affiliate_gmv")),
+            normalize_number(existing.get("videos")),
+        )
+        if candidate_score >= existing_score:
+            deduped_rows_by_store_date_key[dedupe_key] = row
+
+    rows = list(deduped_rows_by_store_date_key.values())
     grouped: dict[str, dict[str, object]] = {}
     meta_by_key: dict[str, dict[str, object]] = {}
     followers_by_key: dict[str, tuple[datetime | None, str]] = {}
+    best_snapshot_by_key: dict[str, tuple[int, datetime | None, float, float, float]] = {}
+    post_snapshot_daily_by_key: dict[str, tuple[float, float, float]] = {}
     valid_keys: set[str] = set()
+
     for row in rows:
         key = normalize_text(row.get("creator_key"))
         if not key:
@@ -400,11 +467,14 @@ def build_db_creator_rollup() -> tuple[dict[str, dict[str, object]], dict[str, d
         orders = normalize_number(row.get("attributed_orders"))
         videos = normalize_number(row.get("videos"))
         followers_text = normalize_text(row.get("affiliate_followers"))
+        span_days = parse_range_span_days(row.get("range_label"))
         group = grouped.setdefault(
             key,
             {
                 "历史总GMV": 0.0,
                 "90天GMV": 0.0,
+                "历史基线GMV": 0.0,
+                "后基线增量GMV": 0.0,
                 "累计订单": 0.0,
                 "近90天订单": 0.0,
                 "累计视频数": 0.0,
@@ -413,14 +483,17 @@ def build_db_creator_rollup() -> tuple[dict[str, dict[str, object]], dict[str, d
                 "最近统计日期": "",
             },
         )
-        group["历史总GMV"] += gmv
-        group["累计订单"] += orders
-        group["累计视频数"] += videos
         group["店铺标签"].add(normalize_text(row.get("store_tag")))
-        if stat_date and stat_date >= cutoff_90:
-            group["90天GMV"] += gmv
-            group["近90天订单"] += orders
-            group["近90天视频数"] += videos
+
+        if span_days > 1:
+            existing = best_snapshot_by_key.get(key)
+            snapshot_score = (span_days, stat_date or datetime.min, gmv, orders, videos)
+            if existing is None or snapshot_score >= existing:
+                best_snapshot_by_key[key] = (span_days, stat_date, gmv, orders, videos)
+        else:
+            prev = post_snapshot_daily_by_key.get(key, (0.0, 0.0, 0.0))
+            post_snapshot_daily_by_key[key] = (prev[0] + gmv, prev[1] + orders, prev[2] + videos)
+
         if followers_text:
             existing_followers = followers_by_key.get(key)
             if existing_followers is None or ((stat_date or datetime.min) >= (existing_followers[0] or datetime.min)):
@@ -437,6 +510,31 @@ def build_db_creator_rollup() -> tuple[dict[str, dict[str, object]], dict[str, d
                     "Affiliate followers": followers_text,
                     "最近统计日期": date_text,
                 }
+
+    for key in valid_keys:
+        group = grouped.setdefault(key, {"店铺标签": set(), "最近统计日期": ""})
+        snapshot = best_snapshot_by_key.get(key)
+        daily = post_snapshot_daily_by_key.get(key, (0.0, 0.0, 0.0))
+        if snapshot is not None:
+            _span, _date, snap_gmv, snap_orders, snap_videos = snapshot
+            group["历史基线GMV"] = snap_gmv
+            group["后基线增量GMV"] = daily[0]
+            group["90天GMV"] = snap_gmv
+            group["近90天订单"] = snap_orders
+            group["近90天视频数"] = snap_videos
+            group["历史总GMV"] = snap_gmv + daily[0]
+            group["累计订单"] = snap_orders + daily[1]
+            group["累计视频数"] = snap_videos + daily[2]
+        else:
+            group["历史基线GMV"] = 0.0
+            group["后基线增量GMV"] = daily[0]
+            group["90天GMV"] = daily[0]
+            group["近90天订单"] = daily[1]
+            group["近90天视频数"] = daily[2]
+            group["历史总GMV"] = daily[0]
+            group["累计订单"] = daily[1]
+            group["累计视频数"] = daily[2]
+
     for key, (_followers_date, followers_text) in followers_by_key.items():
         meta = meta_by_key.setdefault(
             key,
@@ -872,8 +970,10 @@ def build_payload() -> tuple[dict[str, object], list[dict[str, object]]]:
             creator_stats = creator_rollup.get(key, {})
             video_stats = video_rollup.get(key, {})
             if creator_stats:
-                merged["累计GMV"] = round(normalize_number(creator_stats.get("历史总GMV")), 2)
-                merged["近90天GMV"] = round(normalize_number(creator_stats.get("90天GMV")), 2)
+                history_base = normalize_number(creator_stats.get("历史基线GMV"))
+                history_delta = normalize_number(creator_stats.get("后基线增量GMV"))
+                merged["累计GMV"] = round(history_base + history_delta, 2)
+                merged["近90天GMV"] = round(history_base or normalize_number(creator_stats.get("90天GMV")), 2)
                 merged["最近统计日期"] = normalize_text(creator_stats.get("最近统计日期"))
                 merged["达人名称"] = normalize_text(creator_meta_by_key.get(key, {}).get("达人名称")) or normalize_text(merged.get("达人名称"))
                 merged["主页链接"] = normalize_text(creator_meta_by_key.get(key, {}).get("主页链接")) or normalize_text(merged.get("主页链接"))
