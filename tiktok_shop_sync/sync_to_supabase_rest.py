@@ -20,6 +20,8 @@ DEFAULT_SUPABASE_ANON_KEY = "sb_publishable_tM67K7Mi1qDUkemhgzDuGg_dsdwitBT"
 
 CREATOR_TABLE = "tiktok_creator_performance_raw"
 VIDEO_TABLE = "tiktok_video_performance_raw"
+CREATOR_ON_CONFLICT = "store_tag,stat_date,creator_key,batch_id,source_file"
+VIDEO_ON_CONFLICT = "store_tag,stat_date,creator_key,video_id,product_id,source_file"
 
 CREATOR_FIELD_MAP = {
     "抓取日期": "crawl_date",
@@ -41,6 +43,7 @@ CREATOR_FIELD_MAP = {
     "Videos": "videos",
     "LIVE streams": "live_streams",
     "Avg. daily products sold": "avg_daily_products_sold",
+    "Affiliate followers": "affiliate_followers",
     "Samples shipped": "samples_shipped",
     "数据批次ID": "batch_id",
     "原文件名": "source_file",
@@ -160,6 +163,7 @@ def insert_batches(
     table_name: str,
     rows: list[dict[str, str]],
     batch_size: int,
+    on_conflict: str,
 ) -> dict[str, object]:
     if not rows:
         return {
@@ -176,11 +180,11 @@ def insert_batches(
         status, body, _headers = rest_request(
             supabase_url,
             anon_key,
-            f"/{table_name}",
+            f"/{table_name}?on_conflict={urllib.parse.quote(on_conflict, safe=',')}",
             method="POST",
             payload=batch,
             headers={
-                "Prefer": "resolution=ignore-duplicates,return=minimal",
+                "Prefer": "resolution=merge-duplicates,return=minimal",
             },
         )
         status_codes.append(status)
@@ -261,7 +265,14 @@ def main() -> None:
     creator_rows = [map_row(row, CREATOR_FIELD_MAP) for row in load_rows(Path(args.creator_file))]
     video_rows = [map_row(row, VIDEO_FIELD_MAP) for row in load_rows(Path(args.video_file))]
 
-    creator_result = insert_batches(supabase_url, anon_key, CREATOR_TABLE, creator_rows, args.batch_size)
+    creator_result = insert_batches(
+        supabase_url,
+        anon_key,
+        CREATOR_TABLE,
+        creator_rows,
+        args.batch_size,
+        CREATOR_ON_CONFLICT,
+    )
     if not creator_result["success"]:
         print(
             json.dumps(
@@ -282,7 +293,14 @@ def main() -> None:
         )
         raise SystemExit(1)
 
-    video_result = insert_batches(supabase_url, anon_key, VIDEO_TABLE, video_rows, args.batch_size)
+    video_result = insert_batches(
+        supabase_url,
+        anon_key,
+        VIDEO_TABLE,
+        video_rows,
+        args.batch_size,
+        VIDEO_ON_CONFLICT,
+    )
     if not video_result["success"]:
         print(
             json.dumps(

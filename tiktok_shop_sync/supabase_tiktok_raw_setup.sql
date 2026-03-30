@@ -19,12 +19,16 @@ create table if not exists public.tiktok_creator_performance_raw (
   videos text,
   live_streams text,
   avg_daily_products_sold text,
+  affiliate_followers text,
   samples_shipped text,
   batch_id text,
   source_file text,
   note text,
   unique (store_tag, stat_date, creator_key, batch_id, source_file)
 );
+
+alter table public.tiktok_creator_performance_raw
+  add column if not exists affiliate_followers text;
 
 create table if not exists public.tiktok_video_performance_raw (
   id bigserial primary key,

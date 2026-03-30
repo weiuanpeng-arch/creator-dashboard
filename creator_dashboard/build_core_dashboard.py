@@ -95,6 +95,7 @@ CREATOR_RAW_COLUMNS = [
     "creator_name",
     "creator_handle",
     "creator_key",
+    "affiliate_followers",
     "affiliate_gmv",
     "attributed_orders",
     "videos",
@@ -387,6 +388,7 @@ def build_db_creator_rollup() -> tuple[dict[str, dict[str, object]], dict[str, d
     cutoff_90 = latest_stat - timedelta(days=89)
     grouped: dict[str, dict[str, object]] = {}
     meta_by_key: dict[str, dict[str, object]] = {}
+    followers_by_key: dict[str, tuple[datetime | None, str]] = {}
     valid_keys: set[str] = set()
     for row in rows:
         key = normalize_text(row.get("creator_key"))
@@ -397,6 +399,7 @@ def build_db_creator_rollup() -> tuple[dict[str, dict[str, object]], dict[str, d
         gmv = normalize_number(row.get("affiliate_gmv"))
         orders = normalize_number(row.get("attributed_orders"))
         videos = normalize_number(row.get("videos"))
+        followers_text = normalize_text(row.get("affiliate_followers"))
         group = grouped.setdefault(
             key,
             {
@@ -418,6 +421,10 @@ def build_db_creator_rollup() -> tuple[dict[str, dict[str, object]], dict[str, d
             group["90天GMV"] += gmv
             group["近90天订单"] += orders
             group["近90天视频数"] += videos
+        if followers_text:
+            existing_followers = followers_by_key.get(key)
+            if existing_followers is None or ((stat_date or datetime.min) >= (existing_followers[0] or datetime.min)):
+                followers_by_key[key] = (stat_date, followers_text)
         if stat_date:
             date_text = stat_date.strftime("%Y-%m-%d")
             if date_text > normalize_text(group.get("最近统计日期")):
@@ -427,9 +434,21 @@ def build_db_creator_rollup() -> tuple[dict[str, dict[str, object]], dict[str, d
                     "达人名称": normalize_text(row.get("creator_name")),
                     "达人主页标识": handle,
                     "主页链接": f"https://www.tiktok.com/@{handle.lstrip('@')}" if handle else "",
-                    "Affiliate followers": "",
+                    "Affiliate followers": followers_text,
                     "最近统计日期": date_text,
                 }
+    for key, (_followers_date, followers_text) in followers_by_key.items():
+        meta = meta_by_key.setdefault(
+            key,
+            {
+                "达人名称": "",
+                "达人主页标识": key,
+                "主页链接": f"https://www.tiktok.com/@{key.lstrip('@')}" if key else "",
+                "最近统计日期": "",
+            },
+        )
+        if followers_text and not normalize_text(meta.get("Affiliate followers")):
+            meta["Affiliate followers"] = followers_text
     return grouped, meta_by_key, valid_keys
 
 
