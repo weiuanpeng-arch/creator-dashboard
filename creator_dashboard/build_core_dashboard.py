@@ -4,11 +4,10 @@ import csv
 import json
 import os
 import re
+import subprocess
 from datetime import datetime, timedelta
 from pathlib import Path
-from urllib.error import URLError
 from urllib.parse import quote
-from urllib.request import Request, urlopen
 
 from openpyxl import load_workbook
 
@@ -30,6 +29,7 @@ LEVEL_SHEET_PATH = Path("/Users/apple/Downloads/达人等级底表/达人等级�
 SUPABASE_URL = "https://sbznfjnsirajqkkcwayj.supabase.co"
 SUPABASE_ANON_KEY = "sb_publishable_tM67K7Mi1qDUkemhgzDuGg_dsdwitBT"
 REST_PAGE_SIZE = 1000
+SUPABASE_READ_TIMEOUT_SECONDS = float(os.environ.get("TIKTOK_PUBLIC_READ_TIMEOUT_SECONDS", "5"))
 ANSI_ESCAPE_RE = re.compile(r"\x1B\[[0-?]*[ -/]*[@-~]")
 CONTROL_CHAR_RE = re.compile(r"[\x00-\x08\x0B-\x0C\x0E-\x1F]")
 
@@ -219,17 +219,26 @@ def canonical_brand(value: object) -> str:
 
 
 def supabase_request_json(path: str, headers: dict[str, str] | None = None) -> tuple[object, dict[str, str]]:
-    request = Request(
+    command = [
+        "curl",
+        "-sS",
+        "--max-time",
+        str(int(max(SUPABASE_READ_TIMEOUT_SECONDS, 1))),
         f"{SUPABASE_URL}/rest/v1{path}",
-        headers={
-            "apikey": SUPABASE_ANON_KEY,
-            "Authorization": f"Bearer {SUPABASE_ANON_KEY}",
-            **(headers or {}),
-        },
-    )
-    with urlopen(request, timeout=60) as response:
-        payload = json.loads(response.read().decode("utf-8"))
-        return payload, dict(response.headers.items())
+        "-H",
+        f"apikey: {SUPABASE_ANON_KEY}",
+        "-H",
+        f"Authorization: Bearer {SUPABASE_ANON_KEY}",
+    ]
+    for key, value in (headers or {}).items():
+        command.extend(["-H", f"{key}: {value}"])
+    try:
+        payload_text = subprocess.check_output(command, text=True).strip()
+    except subprocess.CalledProcessError:
+        raise RuntimeError("supabase_request_failed")
+    if not payload_text:
+        return [], {}
+    return json.loads(payload_text), {}
 
 
 def fetch_supabase_rows(table: str, columns: list[str], page_size: int = REST_PAGE_SIZE, extra_query: str = "") -> list[dict[str, object]]:
@@ -238,13 +247,16 @@ def fetch_supabase_rows(table: str, columns: list[str], page_size: int = REST_PA
     offset = 0
     rows: list[dict[str, object]] = []
     while True:
-        batch, _headers = supabase_request_json(
-            f"/{table}?select={encoded_select}{query_suffix}",
-            headers={
-                "Range-Unit": "items",
-                "Range": f"{offset}-{offset + page_size - 1}",
-            },
-        )
+        try:
+            batch, _headers = supabase_request_json(
+                f"/{table}?select={encoded_select}{query_suffix}",
+                headers={
+                    "Range-Unit": "items",
+                    "Range": f"{offset}-{offset + page_size - 1}",
+                },
+            )
+        except (RuntimeError, TimeoutError, OSError, json.JSONDecodeError):
+            return rows
         if not isinstance(batch, list):
             raise RuntimeError(f"Unexpected Supabase response for {table}")
         rows.extend(batch)

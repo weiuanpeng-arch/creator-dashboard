@@ -291,10 +291,6 @@ async function clickSameDayRange(page, pickerIndex, dateValue) {
 }
 
 async function setDateRange(page, startDate, endDate, pickerIndex = 1) {
-  if (startDate === endDate) {
-    await clickSameDayRange(page, pickerIndex, startDate);
-    return readAppliedRange(page, pickerIndex);
-  }
   const resolvedIndex = await resolveRangePickerIndex(page, pickerIndex);
   const picker = page.locator(".arco-picker-range").nth(resolvedIndex);
   await picker.click({ force: true });
@@ -454,7 +450,9 @@ async function exportModule(page, context, storeKey, moduleKey, appliedRange) {
     throw new Error(`no export task list found for ${moduleKey}`);
   }
 
-  const selectedTask = pickTask(tasks, moduleConfig.prefix, appliedRange);
+  const selectedTask = createdTaskId
+    ? tasks.find((task) => task.task_id === createdTaskId) || null
+    : pickTask(tasks, moduleConfig.prefix, appliedRange);
   if (!selectedTask) {
     throw new Error(`no export task available for ${moduleKey}`);
   }
@@ -503,8 +501,9 @@ async function main() {
       ) || (await context.newPage());
 
     await openPerformancePage(page, config);
-    // Details 区域上方的第二组日期控件才控制 Videos 导出区间。
-    const appliedRange = await setDateRange(page, startDate, endDate, 1);
+    // Videos 直连创建导出任务时，以请求区间为准；日期控件仅用于页面就绪和兜底校验。
+    await setDateRange(page, startDate, endDate, 1);
+    const appliedRange = { start: startDate, end: endDate };
     await ensurePageReady(page, "Performance");
     const modules = mode === "both" ? ["creator", "video"] : [mode];
     const exports = [];

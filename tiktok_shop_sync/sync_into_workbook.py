@@ -49,6 +49,7 @@ PUBLIC_READ_SYNC_SETTINGS = {
     "anon_key": "sb_publishable_tM67K7Mi1qDUkemhgzDuGg_dsdwitBT",
     "workspace_id": "creator-dashboard-prod",
 }
+SUPABASE_READ_TIMEOUT_SECONDS = float(os.environ.get("TIKTOK_PUBLIC_READ_TIMEOUT_SECONDS", "3"))
 
 ACTIVE_COOP_STATUSES = {"Pending MOU", "Pending review", "MOU submitted", "Pending publish review"}
 CORE_OVERRIDE_MAP = {
@@ -399,7 +400,7 @@ def supabase_request(path: str) -> list[dict]:
             "Authorization": f'Bearer {PUBLIC_READ_SYNC_SETTINGS["anon_key"]}',
         },
     )
-    with urlopen(request, timeout=20) as response:
+    with urlopen(request, timeout=SUPABASE_READ_TIMEOUT_SECONDS) as response:
         return json.loads(response.read().decode("utf-8"))
 
 
@@ -407,7 +408,7 @@ def load_remote_core_overrides() -> dict[str, dict[str, str]]:
     workspace = quote(PUBLIC_READ_SYNC_SETTINGS["workspace_id"], safe="")
     try:
         rows = supabase_request(f"/creator_sync_overrides?workspace_id=eq.{workspace}&select=kol_id,fields")
-    except URLError:
+    except (URLError, HTTPError, TimeoutError, OSError):
         return {}
     overrides: dict[str, dict[str, str]] = {}
     for row in rows or []:
@@ -1457,6 +1458,44 @@ def finalize_last_log_write_meta(path: Path, write_meta: dict[str, str]) -> None
     print(f"finalized sync log: {result}")
 
 
+def parse_pipeline_count(payload: dict, key: str) -> int:
+    try:
+        return int(payload.get(key) or 0)
+    except (TypeError, ValueError):
+        return 0
+
+
+def derive_log_status(last_pipeline_run: dict) -> str:
+    success = parse_pipeline_count(last_pipeline_run, "success")
+    waiting = parse_pipeline_count(last_pipeline_run, "waiting")
+    skipped = parse_pipeline_count(last_pipeline_run, "skipped")
+    failed = parse_pipeline_count(last_pipeline_run, "failed")
+    if failed and not success and not skipped and not waiting:
+        return "失败"
+    if failed:
+        return "部分失败"
+    if skipped and success:
+        return "部分跳过"
+    if skipped:
+        return "已跳过"
+    if waiting and not success:
+        return "等待窗口"
+    return "成功"
+
+
+def derive_log_message(base_message: str, last_pipeline_run: dict) -> str:
+    success = parse_pipeline_count(last_pipeline_run, "success")
+    skipped = parse_pipeline_count(last_pipeline_run, "skipped")
+    failed = parse_pipeline_count(last_pipeline_run, "failed")
+    if failed:
+        return f"本次导出存在失败，沿用当前标准明细 | {base_message}"
+    if skipped and success:
+        return f"本次部分店铺跳过，已用成功店铺结果刷新标准明细 | {base_message}"
+    if skipped:
+        return f"本次未新增导入，沿用当前标准明细 | {base_message}"
+    return base_message
+
+
 def main() -> None:
     video_rows_raw = load_csv(VIDEO_CSV)
     creator_rows_raw = dedupe_creator_rows()
@@ -1531,11 +1570,14 @@ def main() -> None:
     refresh_raw_sheet(workbook, "合作记录明细", RECORD_HEADERS, record_rows, start_row=2)
     update_focus_sheet(workbook, creator_pool_tags)
     update_metrics_sheet(workbook)
+    pipeline_state = load_pipeline_state()
+    last_pipeline_run = pipeline_state.get("last_pipeline_run", {}) if isinstance(pipeline_state, dict) else {}
+    base_message = f"videos={len(video_rows_raw)}, creators={len(creator_rows_raw)}, coop={len(coop_rows)}, product={len(product_rows)}"
 
     append_log(
         workbook,
-        status="成功",
-        message=f"videos={len(video_rows_raw)}, creators={len(creator_rows_raw)}, coop={len(coop_rows)}, product={len(product_rows)}",
+        status=derive_log_status(last_pipeline_run),
+        message=derive_log_message(base_message, last_pipeline_run),
         video_rows=len(video_rows_raw),
         creator_rows=len(creator_rows_raw),
         write_meta={

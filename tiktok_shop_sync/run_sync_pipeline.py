@@ -195,6 +195,84 @@ def normalize_manifest_date(value: str) -> str:
     return text
 
 
+def run_daily_exports_for_store(
+    store_tag: str,
+    key: str,
+    start_date: str,
+    end_date: str,
+    stat_date: str,
+    range_label: str,
+) -> tuple[Path, dict[str, Any], Path, dict[str, Any], str, str]:
+    video_stdout = run_capture(
+        [
+            "node",
+            str(VIDEO_EXPORT_SCRIPT),
+            key,
+            start_date,
+            end_date,
+            "video",
+        ]
+    )
+    video_manifest_path = Path(video_stdout.splitlines()[0].strip())
+    video_manifest = json.loads(video_manifest_path.read_text(encoding="utf-8"))
+    video_export_path = Path(video_manifest["exports"][0]["exportPath"])
+    video_stat_date = normalize_manifest_date(video_manifest.get("appliedRange", {}).get("end", "")) or stat_date
+    run(
+        [
+            "python3",
+            str(IMPORT_EXPORT_SCRIPT),
+            "--file",
+            str(video_export_path),
+            "--source",
+            "video",
+            "--store",
+            store_tag,
+            "--stat-date",
+            video_stat_date,
+            "--range-label",
+            range_label,
+        ]
+    )
+
+    creator_stdout = run_capture(
+        [
+            "node",
+            str(CREATOR_EXPORT_SCRIPT),
+            key,
+            start_date,
+            end_date,
+        ]
+    )
+    creator_manifest_path = Path(creator_stdout.splitlines()[0].strip())
+    creator_manifest = json.loads(creator_manifest_path.read_text(encoding="utf-8"))
+    creator_export_path = Path(creator_manifest["exportPath"])
+    creator_stat_date = normalize_manifest_date(creator_manifest.get("appliedRange", {}).get("end", "")) or stat_date
+    run(
+        [
+            "python3",
+            str(IMPORT_EXPORT_SCRIPT),
+            "--file",
+            str(creator_export_path),
+            "--source",
+            "creator",
+            "--store",
+            store_tag,
+            "--stat-date",
+            creator_stat_date,
+            "--range-label",
+            range_label,
+        ]
+    )
+    return (
+        video_export_path,
+        video_manifest,
+        creator_export_path,
+        creator_manifest,
+        video_stat_date,
+        creator_stat_date,
+    )
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Run TikTok shop sync pipeline.")
     parser.add_argument("--mode", choices=["auto", "daily"], default="auto")
@@ -230,6 +308,12 @@ def cleanup_store_exports(store_state: dict[str, Any]) -> None:
         value = str(store_state.get(key) or "").strip()
         if value:
             cleanup_file(value)
+    extra = store_state.get("cleanup_exports") or []
+    if isinstance(extra, list):
+        for value in extra:
+            if value:
+                cleanup_file(str(value))
+    store_state["cleanup_exports"] = []
 
 
 def parse_skip_message(message: str) -> tuple[str, str] | None:
@@ -330,149 +414,105 @@ def main() -> None:
         if effective_mode != "daily":
             raise ValueError(f"unsupported runtime mode: {effective_mode}")
         start_date, end_date, stat_date, range_label = daily_range(store_state)
-        if parse_iso_date(stat_date) > latest_safe_date:
-            store_state.update(
-                {
-                    "last_mode": "daily_waiting",
-                    "last_run_at": run_date,
-                    "waiting_for_date": stat_date,
-                    "window_status": "waiting",
-                    "last_error": "",
-                }
-            )
-            print(f"[skip] {store_tag}: 下一次增量日期 {stat_date} 还未到可拉取窗口，当前仅拉取到 {latest_safe_date.isoformat()}。")
-            continue
         try:
             launch_profile_for_store(store)
         except Exception as error:
             reason = browser_skip_reason(error)
             store_state.update(
                 {
-                    "last_mode": effective_mode,
-                    "last_run_at": run_date,
-                    "last_status": "skipped",
-                    "window_status": "",
-                    "last_error": reason,
-                    "last_skip_code": "browser_unavailable",
-                    "last_requested_range": {"start": start_date, "end": end_date},
-                }
-            )
-            print(f"[skip] {store_tag}: {reason}")
-            continue
-        try:
-            video_stdout = run_capture(
-                [
-                    "node",
-                    str(VIDEO_EXPORT_SCRIPT),
-                    key,
-                    start_date,
-                    end_date,
-                    "video",
-                ]
-            )
-            video_manifest_path = Path(video_stdout.splitlines()[0].strip())
-            video_manifest = json.loads(video_manifest_path.read_text(encoding="utf-8"))
-            video_export_path = Path(video_manifest["exports"][0]["exportPath"])
-            video_stat_date = normalize_manifest_date(video_manifest.get("appliedRange", {}).get("end", ""))
-            run(
-                [
-                    "python3",
-                    str(IMPORT_EXPORT_SCRIPT),
-                    "--file",
-                    str(video_export_path),
-                    "--source",
-                    "video",
-                    "--store",
-                    store_tag,
-                    "--stat-date",
-                    video_stat_date,
-                    "--range-label",
-                    range_label,
-                ]
-            )
-
-            creator_stdout = run_capture(
-                [
-                    "node",
-                    str(CREATOR_EXPORT_SCRIPT),
-                    key,
-                    start_date,
-                    end_date,
-                ]
-            )
-            creator_manifest_path = Path(creator_stdout.splitlines()[0].strip())
-            creator_manifest = json.loads(creator_manifest_path.read_text(encoding="utf-8"))
-            creator_export_path = Path(creator_manifest["exportPath"])
-            creator_stat_date = normalize_manifest_date(creator_manifest.get("appliedRange", {}).get("end", ""))
-            run(
-                [
-                    "python3",
-                    str(IMPORT_EXPORT_SCRIPT),
-                    "--file",
-                    str(creator_export_path),
-                    "--source",
-                    "creator",
-                    "--store",
-                    store_tag,
-                    "--stat-date",
-                    creator_stat_date,
-                    "--range-label",
-                    range_label,
-                ]
-            )
-
-            store_state.update(
-                {
-                    "initialized": True,
-                    "history_imported": store_state.get("history_imported", False),
-                    "bootstrap_required": False,
-                    "last_mode": effective_mode,
-                    "last_run_at": run_date,
-                    "last_daily_date": stat_date,
-                    "next_increment_date": (parse_iso_date(stat_date) + timedelta(days=1)).isoformat(),
-                    "last_requested_range": {"start": start_date, "end": end_date},
-                    "last_video_stat_date": video_stat_date,
-                    "last_creator_stat_date": creator_stat_date,
-                    "last_video_applied_range": video_manifest.get("appliedRange", {}),
-                    "last_creator_applied_range": creator_manifest.get("appliedRange", {}),
-                    "last_video_export": str(video_export_path),
-                    "last_creator_export": str(creator_export_path),
-                    "last_status": "success",
-                    "window_status": "",
-                    "last_error": "",
-                    "last_success_at": run_date,
-                }
-            )
-        except Exception as error:
-            message = summarize_error(error)
-            skip_detail = parse_skip_message(message)
-            if skip_detail is not None:
-                skip_code, skip_reason = skip_detail
-                store_state.update(
-                    {
                         "last_mode": effective_mode,
                         "last_run_at": run_date,
                         "last_status": "skipped",
                         "window_status": "",
-                        "last_error": skip_reason,
-                        "last_skip_code": skip_code,
+                        "last_error": reason,
+                        "last_skip_code": "browser_unavailable",
                         "last_requested_range": {"start": start_date, "end": end_date},
                     }
                 )
-                print(f"[skip] {store_tag}: {skip_reason}")
+                print(f"[skip] {store_tag}: {reason}")
                 continue
-            store_state.update(
-                {
-                    "last_mode": effective_mode,
-                    "last_run_at": run_date,
-                    "last_status": "error",
-                    "window_status": "",
-                    "last_error": message,
-                    "last_requested_range": {"start": start_date, "end": end_date},
-                }
-            )
-            print(f"[error] {store_tag}: {message}")
-            continue
+        while True:
+            start_date, end_date, stat_date, range_label = daily_range(store_state)
+            if parse_iso_date(stat_date) > latest_safe_date:
+                store_state.update(
+                    {
+                        "last_mode": "daily_waiting",
+                        "last_run_at": run_date,
+                        "waiting_for_date": stat_date,
+                        "window_status": "waiting",
+                        "last_error": "",
+                    }
+                )
+                print(f"[wait] {store_tag}: 当前已补到 {latest_safe_date.isoformat()}，下一次待同步 {stat_date}。")
+                break
+            try:
+                (
+                    video_export_path,
+                    video_manifest,
+                    creator_export_path,
+                    creator_manifest,
+                    video_stat_date,
+                    creator_stat_date,
+                ) = run_daily_exports_for_store(store_tag, key, start_date, end_date, stat_date, range_label)
+
+                cleanup_exports = list(store_state.get("cleanup_exports") or [])
+                cleanup_exports.extend([str(video_export_path), str(creator_export_path)])
+                store_state.update(
+                    {
+                        "initialized": True,
+                        "history_imported": store_state.get("history_imported", False),
+                        "bootstrap_required": False,
+                        "last_mode": effective_mode,
+                        "last_run_at": run_date,
+                        "last_daily_date": stat_date,
+                        "next_increment_date": (parse_iso_date(stat_date) + timedelta(days=1)).isoformat(),
+                        "last_requested_range": {"start": start_date, "end": end_date},
+                        "last_video_stat_date": video_stat_date,
+                        "last_creator_stat_date": creator_stat_date,
+                        "last_video_applied_range": video_manifest.get("appliedRange", {}),
+                        "last_creator_applied_range": creator_manifest.get("appliedRange", {}),
+                        "last_video_export": str(video_export_path),
+                        "last_creator_export": str(creator_export_path),
+                        "last_status": "success",
+                        "window_status": "",
+                        "last_error": "",
+                        "last_success_at": run_date,
+                        "last_skip_code": "",
+                        "waiting_for_date": "",
+                        "cleanup_exports": cleanup_exports,
+                    }
+                )
+                continue
+            except Exception as error:
+                message = summarize_error(error)
+                skip_detail = parse_skip_message(message)
+                if skip_detail is not None:
+                    skip_code, skip_reason = skip_detail
+                    store_state.update(
+                        {
+                            "last_mode": effective_mode,
+                            "last_run_at": run_date,
+                            "last_status": "skipped",
+                            "window_status": "",
+                            "last_error": skip_reason,
+                            "last_skip_code": skip_code,
+                            "last_requested_range": {"start": start_date, "end": end_date},
+                        }
+                    )
+                    print(f"[skip] {store_tag}: {skip_reason}")
+                    break
+                store_state.update(
+                    {
+                        "last_mode": effective_mode,
+                        "last_run_at": run_date,
+                        "last_status": "error",
+                        "window_status": "",
+                        "last_error": message,
+                        "last_requested_range": {"start": start_date, "end": end_date},
+                    }
+                )
+                print(f"[error] {store_tag}: {message}")
+                break
 
     pre_rebuild_summary = pipeline_summary(state)
     state["last_pipeline_run"] = {

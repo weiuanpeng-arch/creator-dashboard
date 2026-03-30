@@ -333,6 +333,34 @@ async function buildCreatorTaskListUrl(page) {
   });
 }
 
+async function buildCreatorExportUrl(page) {
+  return page.evaluate(() => {
+    const url = new URL(location.href);
+    const shopRegion = url.searchParams.get("shop_region") || "ID";
+    const shopId = url.searchParams.get("shop_id") || "";
+    const params = new URLSearchParams({
+      user_language: "en",
+      aid: "4331",
+      app_name: "i18n_ecom_alliance",
+      device_id: "0",
+      device_platform: "web",
+      cookie_enabled: "true",
+      screen_width: String(window.innerWidth || 1280),
+      screen_height: String(window.innerHeight || 800),
+      browser_language: navigator.language || "en-US",
+      browser_platform: navigator.platform || "",
+      browser_name: "Mozilla",
+      browser_version: navigator.userAgent,
+      browser_online: String(navigator.onLine),
+      timezone_name: Intl.DateTimeFormat().resolvedOptions().timeZone || "Asia/Shanghai",
+      oec_seller_id: shopId,
+      shop_region: shopRegion,
+      platform_data_source: "shop",
+    });
+    return `https://affiliate-id.tokopedia.com/api/v3/insights/affiliate/seller/creator/filter_list/export?${params.toString()}`;
+  });
+}
+
 async function exportCreatorReport(page, context, storeKey) {
   await ensurePageReady(page, "Creator Analysis");
   const responses = [];
@@ -439,7 +467,7 @@ async function captureCreatorExportUrl(page) {
     page.off("request", handler);
   }
   if (!urls.length) {
-    throw new Error("creator export url not captured");
+    return buildCreatorExportUrl(page);
   }
   return urls.at(-1);
 }

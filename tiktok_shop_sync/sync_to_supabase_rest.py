@@ -184,7 +184,7 @@ def insert_batches(
             method="POST",
             payload=batch,
             headers={
-                "Prefer": "resolution=merge-duplicates,return=minimal",
+                "Prefer": "resolution=ignore-duplicates,return=minimal",
             },
         )
         status_codes.append(status)
