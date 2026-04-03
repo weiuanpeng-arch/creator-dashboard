@@ -49,9 +49,6 @@ export function toNumber(value) {
 export function formatNumber(value) {
   const num = toNumber(value);
   if (!num) return "0";
-  if (Math.abs(num) >= 10000) {
-    return `${Math.round(num / 10000).toLocaleString("zh-CN", { maximumFractionDigits: 0 })}w`;
-  }
   return Math.round(num).toLocaleString("zh-CN", { maximumFractionDigits: 0 });
 }
 
