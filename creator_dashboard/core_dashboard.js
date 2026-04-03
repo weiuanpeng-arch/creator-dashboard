@@ -627,9 +627,41 @@ function renderSyncHealth() {
       tone: sync.automationStatus === "ACTIVE" ? "ok" : "warn",
     },
     {
+      label: "采集入库状态",
+      value: sync.dataSyncStatus || "未记录",
+      note: sync.dataSyncNote || "浏览器拉起、导出、标准化与数据库入库",
+      tone: String(sync.dataSyncStatus || "").includes("失败")
+        ? "warn"
+        : String(sync.dataSyncStatus || "").includes("成功")
+          ? "ok"
+          : "neutral",
+    },
+    {
+      label: "页面重建状态",
+      value: sync.rebuildStatus || "未记录",
+      note: sync.rebuildNote || "工作簿和页面快照状态",
+      tone: String(sync.rebuildStatus || "").includes("失败")
+        ? "warn"
+        : String(sync.rebuildStatus || "").includes("成功")
+          ? "ok"
+          : "neutral",
+    },
+    {
       label: "上次成功同步",
       value: sync.lastSuccessRunAt || "未记录",
       note: `最近运行 ${sync.lastRunAt || "未记录"}`,
+      tone: "neutral",
+    },
+    {
+      label: "最新单店更新到",
+      value: sync.latestDataDate || "未记录",
+      note: "四店中任一店铺已同步到的最新日期",
+      tone: "neutral",
+    },
+    {
+      label: "四店统一更新到",
+      value: sync.allStoresSyncedThrough || "未记录",
+      note: "当前四店共同已覆盖到的最新日期",
       tone: "neutral",
     },
     {

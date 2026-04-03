@@ -749,6 +749,29 @@ def store_health_row(store_key: str, store: dict[str, object]) -> dict[str, obje
     }
 
 
+def status_display(status: object, kind: str) -> tuple[str, str]:
+    text = normalize_text(status)
+    if kind == "data_sync":
+        mapping = {
+            "success": ("采集入库成功", "4店数据已采集并完成入库"),
+            "partial_success": ("采集部分成功", "存在跳过或待基线店铺"),
+            "partial_failure": ("采集部分失败", "部分店铺或入库步骤失败"),
+            "failed": ("采集入库失败", "本轮采集或数据库同步未完成"),
+            "running": ("采集入库进行中", "正在执行导出、标准化或入库"),
+            "waiting": ("等待数据窗口", "当前没有 backlog，等待下一天数据可拉取"),
+        }
+    else:
+        mapping = {
+            "success": ("页面重建成功", "工作簿和页面快照已刷新"),
+            "failed": ("页面重建失败", "后处理未完成，请查看失败原因"),
+            "running": ("页面重建中", "正在生成工作簿或页面快照"),
+            "pending": ("页面重建待开始", "等待采集入库完成后继续"),
+            "not_started": ("页面重建未开始", "采集未完成，暂未进入重建"),
+            "not_needed": ("页面重建未执行", "本轮无新数据，无需刷新页面快照"),
+        }
+    return mapping.get(text, ("未记录", "暂无状态记录"))
+
+
 def build_sync_health() -> dict[str, object]:
     pipeline_state = load_pipeline_state()
     stores = pipeline_state.get("stores", {}) if isinstance(pipeline_state, dict) else {}
@@ -772,18 +795,26 @@ def build_sync_health() -> dict[str, object]:
     success_count = 0
     waiting_count = 0
     failed_count = 0
+    latest_data_date = ""
+    synced_dates: list[str] = []
     for store_key in ("letme", "stypro", "sparco", "icyee"):
         store = stores.get(store_key, {}) if isinstance(stores, dict) else {}
         row = store_health_row(store_key, store)
         store_rows.append(row)
         value = normalize_text(row.get("value"))
         note = normalize_text(row.get("note"))
+        last_daily = normalize_text(store.get("last_daily_date"))
+        if last_daily:
+            synced_dates.append(last_daily)
+            if not latest_data_date or last_daily > latest_data_date:
+                latest_data_date = last_daily
         if "已同步至" in value:
             success_count += 1
         if "等待" in note:
             waiting_count += 1
         if "失败" in value:
             failed_count += 1
+    all_stores_synced_through = min(synced_dates) if synced_dates else ""
 
     last_success_run_at = normalize_text(run.get("last_success_run_at"))
     if not last_success_run_at:
@@ -794,12 +825,29 @@ def build_sync_health() -> dict[str, object]:
         ]
         last_success_run_at = max(store_successes) if store_successes else "未记录"
 
+    data_sync_status = normalize_text(run.get("data_sync_status")) or normalize_text(run.get("overall_status"))
+    rebuild_status = normalize_text(run.get("rebuild_status"))
+    data_sync_value, data_sync_note = status_display(data_sync_status, "data_sync")
+    rebuild_value, rebuild_note = status_display(rebuild_status, "rebuild")
+    db_sync_error = normalize_text(run.get("db_sync_error"))
+    rebuild_error = normalize_text(run.get("rebuild_error"))
+    if db_sync_error:
+        data_sync_note = f"{data_sync_note} · {db_sync_error}"
+    if rebuild_error:
+        rebuild_note = f"{rebuild_note} · {rebuild_error}"
+
     return {
         "automationStatus": automation.get("status", "UNKNOWN"),
         "schedule": automation.get("schedule", ""),
         "lastRunAt": normalize_text(run.get("run_at")) or "未记录",
         "lastSuccessRunAt": last_success_run_at,
+        "latestDataDate": latest_data_date or "未记录",
+        "allStoresSyncedThrough": all_stores_synced_through or "未记录",
         "nextSyncDate": normalize_text(run.get("next_sync_date")) or "未记录",
+        "dataSyncStatus": data_sync_value,
+        "dataSyncNote": data_sync_note,
+        "rebuildStatus": rebuild_value,
+        "rebuildNote": rebuild_note,
         "summary": f"{success_count} 已同步 / {waiting_count} 等待 / {failed_count} 失败",
         "lastFailure": last_failure or "无",
         "stores": store_rows,
@@ -825,6 +873,30 @@ def build_sync_health_metrics(sync_health: dict[str, object]) -> list[dict[str, 
             "数值": sync_health.get("lastSuccessRunAt", "未记录"),
             "说明": "最近一次成功完成日更的日期",
             "": "",
+        },
+        {
+            "指标": "最新单店更新到",
+            "数值": sync_health.get("latestDataDate", "未记录"),
+            "说明": "四店中任一店铺已更新到的最新日期",
+            "": "",
+        },
+        {
+            "指标": "四店统一更新到",
+            "数值": sync_health.get("allStoresSyncedThrough", "未记录"),
+            "说明": "当前四店都已覆盖到的共同最新日期",
+            "": "",
+        },
+        {
+            "指标": "采集入库状态",
+            "数值": sync_health.get("dataSyncStatus", "未记录"),
+            "说明": "浏览器拉起、导出、标准化和数据库入库状态",
+            "": sync_health.get("dataSyncNote", ""),
+        },
+        {
+            "指标": "页面重建状态",
+            "数值": sync_health.get("rebuildStatus", "未记录"),
+            "说明": "工作簿与页面快照重建状态",
+            "": sync_health.get("rebuildNote", ""),
         },
         {
             "指标": "当前待同步日期",
