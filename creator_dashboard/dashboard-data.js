@@ -50,9 +50,9 @@ export function formatNumber(value) {
   const num = toNumber(value);
   if (!num) return "0";
   if (Math.abs(num) >= 10000) {
-    return `${(num / 10000).toLocaleString("zh-CN", { maximumFractionDigits: 2 })}w`;
+    return `${Math.round(num / 10000).toLocaleString("zh-CN", { maximumFractionDigits: 0 })}w`;
   }
-  return num.toLocaleString("zh-CN", { maximumFractionDigits: 2 });
+  return Math.round(num).toLocaleString("zh-CN", { maximumFractionDigits: 0 });
 }
 
 export function formatFollowerCount(value) {
