@@ -1,904 +1,244 @@
-const CORE_SYNC_SETTINGS_KEY = "core_dashboard_sync_settings_v1";
-const LEGACY_SYNC_SETTINGS_KEY = "creator_dashboard_sync_settings_v1";
-const CORE_LOCAL_OVERRIDE_KEY = "core_dashboard_local_overrides_v1";
-const PUBLIC_READ_SYNC_SETTINGS = {
-  supabaseUrl: "https://sbznfjnsirajqkkcwayj.supabase.co",
-  anonKey: "sb_publishable_tM67K7Mi1qDUkemhgzDuGg_dsdwitBT",
-  workspaceId: "creator-dashboard-prod",
-};
+import {
+  loadDashboardPayload,
+  buildDashboardModel,
+  buildStatusItems,
+  buildSummaryCards,
+  buildMetricNotes,
+  buildAssumptionNotes,
+} from "./dashboard-data.js";
+import {
+  createFilterState,
+  buildCreatorFilterOptions,
+  filterCreatorRows,
+  filterRecordRows,
+  paginateRows,
+  normalizeTabForToolbar,
+} from "./dashboard-filters.js";
+import { createSyncService, formatSyncError } from "./dashboard-sync.js";
+import {
+  renderStatusStrip,
+  renderSummaryCards,
+  renderCreatorTable,
+  renderRecordsTable,
+  renderCockpit,
+  renderSelectOptions,
+} from "./dashboard-tables.js";
+import { createModalController } from "./dashboard-modal.js";
 
-const CORE_EDIT_FIELDS = [
-  { label: "复投产品链接", remoteKey: "core_复投产品链接", type: "text", placeholder: "粘贴产品链接或直接输入 PID" },
-  { label: "复投产品PID", remoteKey: "core_复投产品PID", type: "text", placeholder: "可直接输入数字 PID" },
-  { label: "优先级", remoteKey: "core_优先级", type: "select", options: ["高", "中", "低"] },
-  { label: "下一步动作", remoteKey: "core_下一步动作", type: "textarea", placeholder: "例如：补齐复投产品并跟进发布时间" },
-  { label: "负责人", remoteKey: "core_负责人", type: "text", placeholder: "负责人" },
-  { label: "截止日期", remoteKey: "core_截止日期", type: "date", placeholder: "" },
-  { label: "备注", remoteKey: "core_备注", type: "textarea", placeholder: "补充运营判断和人工备注" },
-];
-
-const TABLE_COLUMNS = [
-  "达人名称",
-  "达人ID",
-  "平台",
-  "粉丝量",
-  "达人分层(L0/L1/L2/L3)",
-  "达人类型",
-  "品牌标签",
-  "历史总GMV",
-  "90天GMV",
-  "近30天发布视频gmv",
-  "最近合作日期",
-  "当前合作状态",
-  "近30天合作次数",
-  "平均间隔天数",
-  "距离上次发布天数",
-  "近30天是否出单(Y/N)",
-  "是否进入复投(Y/N)",
-  "是否超时未合作",
-  "平均交付时间",
-  "优先级",
-  "下一步动作",
-  "负责人",
-  "截止日期",
-  "备注",
-];
-
-const state = {
-  search: "",
-  level: "全部",
-  status: "全部",
-  priority: "全部",
-  platform: "全部",
-  repurchase: "全部",
-  brandTag: "全部",
-  activeTab: "overview",
-  activeCreatorId: "",
-  overviewPage: 1,
-  focusPage: 1,
-};
-
-const OVERVIEW_PAGE_SIZE = 100;
-const FOCUS_PAGE_SIZE = 100;
+const CREATOR_PAGE_SIZE = 100;
 
 const elements = {
   generatedAt: document.querySelector("#generated-at"),
-  statsGrid: document.querySelector("#stats-grid"),
-  assumptionList: document.querySelector("#assumption-list"),
+  cloudStatusPill: document.querySelector("#cloud-status-pill"),
+  cloudStatusText: document.querySelector("#cloud-status-text"),
+  statusStrip: document.querySelector("#status-strip"),
+  summaryGrid: document.querySelector("#summary-grid"),
+  tabs: document.querySelectorAll(".tab"),
+  panels: document.querySelectorAll(".tab-panel"),
+  creatorToolbar: document.querySelector("#creator-toolbar"),
+  recordToolbar: document.querySelector("#record-toolbar"),
+  quickFilterButtons: document.querySelectorAll("[data-quick-filter]"),
+  searchInput: document.querySelector("#search-input"),
+  brandFilter: document.querySelector("#brand-filter"),
   levelFilter: document.querySelector("#level-filter"),
   statusFilter: document.querySelector("#status-filter"),
   priorityFilter: document.querySelector("#priority-filter"),
   platformFilter: document.querySelector("#platform-filter"),
   repurchaseFilter: document.querySelector("#repurchase-filter"),
-  brandFilter: document.querySelector("#brand-filter"),
-  resultTitle: document.querySelector("#result-title"),
-  resultSubtitle: document.querySelector("#result-subtitle"),
-  overviewHead: document.querySelector("#overview-head"),
-  overviewBody: document.querySelector("#overview-body"),
-  overviewPagination: document.querySelector("#overview-pagination"),
+  recordSearchInput: document.querySelector("#record-search-input"),
+  recordStoreFilter: document.querySelector("#record-store-filter"),
+  gmvMeta: document.querySelector("#gmv-meta"),
+  focusMeta: document.querySelector("#focus-meta"),
+  recordsMeta: document.querySelector("#records-meta"),
+  gmvHead: document.querySelector("#gmv-head"),
+  gmvBody: document.querySelector("#gmv-body"),
+  gmvPagination: document.querySelector("#gmv-pagination"),
   focusHead: document.querySelector("#focus-head"),
   focusBody: document.querySelector("#focus-body"),
   focusPagination: document.querySelector("#focus-pagination"),
-  recordBody: document.querySelector("#record-body"),
+  recordsHead: document.querySelector("#records-head"),
+  recordsBody: document.querySelector("#records-body"),
+  storeHealthList: document.querySelector("#store-health-list"),
+  poolHealthList: document.querySelector("#pool-health-list"),
+  activityList: document.querySelector("#activity-list"),
+  quickActions: document.querySelector("#quick-actions"),
   metricList: document.querySelector("#metric-list"),
-  syncHealthGrid: document.querySelector("#sync-health-grid"),
-  searchInput: document.querySelector("#search-input"),
-  tabs: document.querySelectorAll(".tab"),
-  panels: document.querySelectorAll(".tab-panel"),
-  coreEditorName: document.querySelector("#core-editor-name"),
-  coreWritePasscode: document.querySelector("#core-write-passcode"),
-  coreSaveSync: document.querySelector("#core-save-sync"),
-  coreRefreshCloud: document.querySelector("#core-refresh-cloud"),
-  coreClearSync: document.querySelector("#core-clear-sync"),
-  coreSyncStatus: document.querySelector("#core-sync-status"),
-  coopUploadInput: document.querySelector("#coop-upload-input"),
-  coopUploadButton: document.querySelector("#coop-upload-button"),
-  skuUploadInput: document.querySelector("#sku-upload-input"),
-  skuUploadButton: document.querySelector("#sku-upload-button"),
-  uploadStatus: document.querySelector("#upload-status"),
-  detailModal: document.querySelector("#core-detail-modal"),
-  detailTitle: document.querySelector("#core-detail-title"),
-  detailSubtitle: document.querySelector("#core-detail-subtitle"),
-  detailBody: document.querySelector("#core-detail-body"),
-  closeModal: document.querySelector("#core-close-modal"),
+  assumptionList: document.querySelector("#assumption-list"),
+  openUploadModal: document.querySelector("#open-upload-modal"),
+  openSyncSettings: document.querySelector("#open-sync-settings"),
+  openManualSync: document.querySelector("#open-manual-sync"),
 };
 
-let payload;
-let baseOverview = [];
-let baseFocus = [];
-let renderedOverview = [];
-let renderedFocus = [];
-let remoteRawFieldsById = {};
-let remoteCoreOverridesById = {};
-let localCoreOverridesById = {};
-let syncSettings = {
-  supabaseUrl: PUBLIC_READ_SYNC_SETTINGS.supabaseUrl,
-  anonKey: PUBLIC_READ_SYNC_SETTINGS.anonKey,
-  workspaceId: PUBLIC_READ_SYNC_SETTINGS.workspaceId,
-  editorName: "",
-  writePasscode: "",
+const app = {
+  payload: null,
+  model: null,
+  filters: createFilterState(),
+  syncService: null,
+  modalController: null,
 };
 
-function escapeHtml(value) {
-  return String(value ?? "")
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;");
+function updateCloudStatus(connected, message) {
+  elements.cloudStatusPill.dataset.tone = connected ? "ok" : "warn";
+  elements.cloudStatusText.textContent = message;
 }
 
-function unique(items) {
-  return [...new Set(items.filter(Boolean))].sort((a, b) => a.localeCompare(b, "zh-CN"));
+function syncToolbarVisibility() {
+  const tab = normalizeTabForToolbar(app.filters.activeTab);
+  elements.creatorToolbar.classList.toggle("is-hidden", tab === "records" || tab === "cockpit");
+  elements.recordToolbar.classList.toggle("is-hidden", tab !== "records");
 }
 
-function splitMultiValue(value) {
-  return String(value || "")
-    .split(/\s*\/\s*/)
-    .map((item) => item.trim())
-    .filter(Boolean);
+function renderCreatorFilterOptions() {
+  const options = buildCreatorFilterOptions(app.model);
+  renderSelectOptions(elements.brandFilter, options.brandTags, "全部");
+  renderSelectOptions(elements.levelFilter, options.levels, "全部");
+  renderSelectOptions(elements.statusFilter, options.statuses, "全部");
+  renderSelectOptions(elements.priorityFilter, options.priorities, "全部");
+  renderSelectOptions(elements.platformFilter, options.platforms, "全部");
+  renderSelectOptions(elements.repurchaseFilter, ["Y", "N"], "全部");
+  renderSelectOptions(elements.recordStoreFilter, options.recordStores, "全部店铺");
+
+  elements.brandFilter.value = app.filters.brandTag;
+  elements.levelFilter.value = app.filters.level;
+  elements.statusFilter.value = app.filters.status;
+  elements.priorityFilter.value = app.filters.priority;
+  elements.platformFilter.value = app.filters.platform;
+  elements.repurchaseFilter.value = app.filters.repurchase;
+  elements.recordStoreFilter.value = app.filters.recordStore;
 }
 
-function toNumber(value) {
-  const num = Number(value);
-  return Number.isFinite(num) ? num : 0;
+function buildFilteredData() {
+  const gmvRows = filterCreatorRows(app.model.gmvRows, app.filters);
+  const focusRows = filterCreatorRows(app.model.focusRows, app.filters);
+  const records = filterRecordRows(app.model.records, app.filters);
+  return { gmvRows, focusRows, records };
 }
 
-function formatNumber(value) {
-  const num = toNumber(value);
-  if (!num) return "0";
-  return num.toLocaleString("zh-CN", { maximumFractionDigits: 2 });
-}
-
-function normalizeSyncSettings(raw = {}) {
-  return {
-    supabaseUrl: String(raw.supabaseUrl || raw.supabase_url || PUBLIC_READ_SYNC_SETTINGS.supabaseUrl || "")
-      .trim()
-      .replace(/\/+$/, ""),
-    anonKey: String(raw.anonKey || raw.anon_key || PUBLIC_READ_SYNC_SETTINGS.anonKey || "").trim(),
-    workspaceId: String(raw.workspaceId || raw.workspace_id || PUBLIC_READ_SYNC_SETTINGS.workspaceId || "").trim(),
-    editorName: String(raw.editorName || raw.editor_name || "").trim(),
-    writePasscode: String(raw.writePasscode || raw.write_passcode || "").trim(),
-  };
-}
-
-function loadSyncSettings() {
-  try {
-    const current = JSON.parse(localStorage.getItem(CORE_SYNC_SETTINGS_KEY) || "{}");
-    if (current && Object.keys(current).length) {
-      return normalizeSyncSettings(current);
-    }
-    const legacy = JSON.parse(localStorage.getItem(LEGACY_SYNC_SETTINGS_KEY) || "{}");
-    if (legacy && Object.keys(legacy).length) {
-      return normalizeSyncSettings({
-        supabaseUrl: legacy.supabaseUrl || legacy.supabase_url,
-        anonKey: legacy.anonKey || legacy.anon_key,
-        workspaceId: legacy.workspaceId || legacy.workspace_id,
-        editorName: "",
-        writePasscode: "",
-      });
-    }
-    return normalizeSyncSettings();
-  } catch {
-    return normalizeSyncSettings();
-  }
-}
-
-function persistSyncSettings(settings) {
-  localStorage.setItem(CORE_SYNC_SETTINGS_KEY, JSON.stringify(normalizeSyncSettings(settings)));
-}
-
-function loadLocalOverrides() {
-  try {
-    return JSON.parse(localStorage.getItem(CORE_LOCAL_OVERRIDE_KEY) || "{}");
-  } catch {
-    return {};
-  }
-}
-
-function persistLocalOverrides(overrides) {
-  localStorage.setItem(CORE_LOCAL_OVERRIDE_KEY, JSON.stringify(overrides));
-}
-
-function setSyncStatus(text) {
-  elements.coreSyncStatus.textContent = text;
-}
-
-function setUploadStatus(text) {
-  if (elements.uploadStatus) {
-    elements.uploadStatus.textContent = text;
-  }
-}
-
-function formatSyncError(error) {
-  const message = String(error?.message || error || "").trim();
-  if (!message) {
-    return "共享库暂时不可用，当前会继续使用本机暂存。";
-  }
-  if (/failed to fetch/i.test(message) || /networkerror/i.test(message) || /err_connection/i.test(message)) {
-    return "当前浏览器环境暂时无法连接共享库，页面仍可正常浏览并保存到本机。";
-  }
-  return message;
-}
-
-function parsePidFromText(value) {
-  const text = String(value || "").trim();
-  if (!text) return "";
-  if (/^\d+$/.test(text)) return text;
-  const patterns = [/\/product\/(\d+)/i, /[?&](?:pid|product_id)=([0-9]+)/i, /\b(\d{12,})\b/];
-  for (const pattern of patterns) {
-    const match = text.match(pattern);
-    if (match) {
-      return match[1];
-    }
-  }
-  return "";
-}
-
-function buildSupabaseHeaders(extra = {}) {
-  return {
-    apikey: syncSettings.anonKey,
-    Authorization: `Bearer ${syncSettings.anonKey}`,
-    ...extra,
-  };
-}
-
-async function supabaseRequest(path, options = {}) {
-  const { headers = {}, ...rest } = options;
-  const response = await fetch(`${syncSettings.supabaseUrl}/rest/v1${path}`, {
-    ...rest,
-    headers: buildSupabaseHeaders(headers),
-  });
-  if (!response.ok) {
-    const text = await response.text();
-    throw new Error(text || `Supabase ${response.status}`);
-  }
-  if (response.status === 204) {
-    return null;
-  }
-  return response.json();
-}
-
-function extractCoreFields(fields = {}) {
-  const extracted = {};
-  for (const config of CORE_EDIT_FIELDS) {
-    extracted[config.label] = String(fields[config.remoteKey] || "");
-  }
-  if (!extracted["复投产品PID"] && extracted["复投产品链接"]) {
-    extracted["复投产品PID"] = parsePidFromText(extracted["复投产品链接"]);
-  }
-  return extracted;
-}
-
-function canWriteShared() {
-  return Boolean(syncSettings.editorName && syncSettings.writePasscode);
-}
-
-function ensureXlsxReady() {
-  if (!window.XLSX) {
-    throw new Error("页面还没有加载完成，请刷新后重试。");
-  }
-}
-
-function readFileAsArrayBuffer(file) {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve(reader.result);
-    reader.onerror = () => reject(new Error("读取文件失败"));
-    reader.readAsArrayBuffer(file);
-  });
-}
-
-async function parseWorkbookRows(file) {
-  ensureXlsxReady();
-  const buffer = await readFileAsArrayBuffer(file);
-  const workbook = window.XLSX.read(buffer, { type: "array" });
-  const sheet = workbook.Sheets[workbook.SheetNames[0]];
-  return window.XLSX.utils.sheet_to_json(sheet, { defval: "" });
-}
-
-function normalizeCooperationUploadRows(rows) {
-  return rows
-    .map((row) => ({
-      cooperation_id: String(row["合作ID"] || "").trim(),
-      kol_id: String(row["kolId"] || "").trim(),
-      platform: String(row["平台"] || "").trim(),
-      cooperation_type: String(row["合作类型"] || "").trim(),
-      start_at: String(row["开始时间"] || "").trim(),
-      end_at: String(row["结束时间"] || "").trim(),
-      is_joint_post: String(row["是否为Joint Post合作"] || "").trim(),
-      sample_type: String(row["样品类型"] || "").trim(),
-      shipping_channel: String(row["发货渠道"] || "").trim(),
-      cooperation_attribute: String(row["合作属性"] || "").trim(),
-      cooperation_fee: String(row["合作费用"] || "").trim(),
-      prepaid_fee: String(row["预付费用"] || "").trim(),
-      commission_rate: String(row["佣金比例"] || "").trim(),
-      shipping_address: String(row["收获地址"] || "").trim(),
-      live_minutes: String(row["直播分钟数"] || "").trim(),
-      product_spu_list: String(row["合作商品SPU，以 / 分割"] || "").trim(),
-      created_at_source: String(row["创建时间"] || "").trim(),
-      updated_at_source: String(row["更新时间"] || "").trim(),
-      created_by_source: String(row["创建人"] || "").trim(),
-      status: String(row["状态"] || "").trim(),
-    }))
-    .filter((row) => row.cooperation_id || row.kol_id);
-}
-
-function normalizeSkuUploadRows(rows) {
-  return rows
-    .map((row) => ({
-      spu: String(row["spu"] || row["SPU"] || "").trim(),
-      sku: String(row["sku"] || row["SKU"] || "").trim().toUpperCase(),
-      cost: String(row["cost"] || row["COST"] || "").trim(),
-      country_code: String(row["country_code"] || row["country code"] || row["COUNTRY_CODE"] || "").trim().toUpperCase(),
-    }))
-    .filter((row) => row.spu && row.sku);
-}
-
-async function replaceCloudUpload(functionName, fileName, rows) {
-  return supabaseRequest(`/rpc/${functionName}`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      p_workspace_id: syncSettings.workspaceId,
-      p_passcode: syncSettings.writePasscode,
-      p_editor_name: syncSettings.editorName,
-      p_source_file: fileName,
-      p_rows: rows,
-    }),
-  });
-}
-
-async function loadRemoteOverrides() {
-  const workspace = encodeURIComponent(syncSettings.workspaceId);
-  const rows = await supabaseRequest(
-    `/creator_sync_overrides?workspace_id=eq.${workspace}&select=kol_id,fields,updated_at,updated_by`
-  );
-  remoteRawFieldsById = {};
-  remoteCoreOverridesById = {};
-  (rows || []).forEach((row) => {
-    const creatorId = String(row.kol_id || "");
-    const fields = row.fields || {};
-    remoteRawFieldsById[creatorId] = fields;
-    remoteCoreOverridesById[creatorId] = extractCoreFields(fields);
-  });
-}
-
-function mergeCoreValues(row) {
-  const creatorId = String(row["达人ID"] || "");
-  const remote = remoteCoreOverridesById[creatorId] || {};
-  const local = localCoreOverridesById[creatorId] || {};
-  const merged = { ...row };
-  CORE_EDIT_FIELDS.forEach((field) => {
-    const nextValue = local[field.label] || remote[field.label] || "";
-    if (nextValue) {
-      merged[field.label] = nextValue;
-    }
-  });
-  merged["优先级"] = local["优先级"] || remote["优先级"] || merged["优先级"] || "";
-  merged["下一步动作"] = local["下一步动作"] || remote["下一步动作"] || merged["下一步动作"] || "";
-  merged["负责人"] = local["负责人"] || remote["负责人"] || merged["负责人"] || "";
-  merged["截止日期"] = local["截止日期"] || remote["截止日期"] || merged["截止日期"] || "";
-  merged["备注"] = local["备注"] || remote["备注"] || merged["备注"] || "";
-  merged["复投产品链接"] = local["复投产品链接"] || remote["复投产品链接"] || "";
-  merged["复投产品PID"] =
-    local["复投产品PID"] ||
-    remote["复投产品PID"] ||
-    parsePidFromText(merged["复投产品链接"]) ||
-    "";
-  return merged;
-}
-
-function populateSelect(select, options) {
-  select.innerHTML = "";
-  ["全部", ...options].forEach((option) => {
-    const node = document.createElement("option");
-    node.value = option;
-    node.textContent = option;
-    select.appendChild(node);
-  });
-}
-
-function populateFilters() {
-  const combined = [...renderedOverview, ...renderedFocus];
-  populateSelect(elements.levelFilter, unique(combined.map((item) => item["达人分层(L0/L1/L2/L3)"])));
-  populateSelect(elements.statusFilter, unique(combined.map((item) => item["当前合作状态"])));
-  populateSelect(elements.priorityFilter, unique(combined.map((item) => item["优先级"])));
-  populateSelect(elements.platformFilter, unique(combined.map((item) => item["平台"])));
-  populateSelect(elements.repurchaseFilter, ["Y", "N"]);
-  populateSelect(elements.brandFilter, unique(combined.flatMap((item) => splitMultiValue(item["品牌标签"]))));
-}
-
-function matches(row) {
-  const text = [row["达人ID"], row["达人名称"], row["备注"]].join(" ").toLowerCase();
-  if (state.search && !text.includes(state.search)) return false;
-  if (state.level !== "全部" && row["达人分层(L0/L1/L2/L3)"] !== state.level) return false;
-  if (state.status !== "全部" && row["当前合作状态"] !== state.status) return false;
-  if (state.priority !== "全部" && row["优先级"] !== state.priority) return false;
-  if (state.platform !== "全部" && row["平台"] !== state.platform) return false;
-  if (state.repurchase !== "全部" && row["是否进入复投(Y/N)"] !== state.repurchase) return false;
-  if (state.brandTag !== "全部" && !splitMultiValue(row["品牌标签"]).includes(state.brandTag)) return false;
-  return true;
-}
-
-function sortRows(rows) {
-  return [...rows].sort((a, b) => {
-    const gmvGap = toNumber(b["历史总GMV"]) - toNumber(a["历史总GMV"]);
-    if (gmvGap !== 0) return gmvGap;
-    const recentGap = toNumber(b["90天GMV"]) - toNumber(a["90天GMV"]);
-    if (recentGap !== 0) return recentGap;
-    return String(a["达人名称"] || "").localeCompare(String(b["达人名称"] || ""), "zh-CN");
-  });
-}
-
-function filteredOverview() {
-  return sortRows(renderedOverview.filter(matches));
-}
-
-function filteredFocus() {
-  return sortRows(renderedFocus.filter(matches));
-}
-
-function filteredRecords() {
-  const sourceRows = state.activeTab === "focus" ? filteredFocus() : filteredOverview();
-  const ids = new Set(sourceRows.map((item) => item["达人ID"]));
-  return payload.records.filter((item) => ids.has(item["达人ID"]));
-}
-
-function renderStats(overviewRows, focusRows) {
-  const activeRows = state.activeTab === "focus" ? focusRows : overviewRows;
-  const highPriority = activeRows.filter((item) => item["优先级"] === "高").length;
-  const timeout = activeRows.filter((item) => item["是否超时未合作"] === "Y").length;
-  const repurchase = activeRows.filter((item) => item["是否进入复投(Y/N)"] === "Y").length;
-  const cards = [
-    { label: "全量池数量", value: payload.stats.overviewCount || 0, note: "后台记录的 Creator 全量唯一达人数量" },
-    { label: "189重点池人数", value: focusRows.length, note: `固定 189 池 / 缺失 ${payload.stats.missingFocusCount || 0}` },
-    { label: "GMV重点池人数", value: overviewRows.length, note: `90天GMV > 0 / 总池 ${payload.stats.gmvFocusCount || renderedOverview.length}` },
-    { label: "高优先级", value: highPriority, note: state.activeTab === "focus" ? "当前 189 重点池筛选结果" : "当前 GMV重点池筛选结果" },
-    { label: "复投 / 超时", value: `${repurchase} / ${timeout}`, note: "当前筛选结果" },
-  ];
-  elements.statsGrid.innerHTML = cards
-    .map(
-      (card) => `
-        <article>
-          <p>${escapeHtml(card.label)}</p>
-          <strong>${escapeHtml(card.value)}</strong>
-          <p>${escapeHtml(card.note)}</p>
-        </article>
-      `
-    )
-    .join("");
-}
-
-function renderAssumptions() {
-  elements.assumptionList.innerHTML = payload.assumptions
-    .map((item) => `<article class="assumption-item">${escapeHtml(item)}</article>`)
-    .join("");
-}
-
-function paginateRows(rows, page, pageSize) {
-  const total = rows.length;
-  const totalPages = Math.max(1, Math.ceil(total / pageSize));
-  const safePage = Math.min(Math.max(page, 1), totalPages);
-  const start = (safePage - 1) * pageSize;
-  return {
-    total,
-    totalPages,
-    page: safePage,
-    start,
-    end: Math.min(start + pageSize, total),
-    rows: rows.slice(start, start + pageSize),
-  };
-}
-
-function renderPagination(container, payload, onPageChange) {
-  if (!container) return;
-  if (!payload.total) {
-    container.innerHTML = "";
-    return;
-  }
-  container.innerHTML = `
-    <div>显示 ${payload.start + 1}-${payload.end} / 共 ${payload.total} 条</div>
-    <div class="button-row">
-      <button class="ghost-button" type="button" data-page-action="prev" ${payload.page <= 1 ? "disabled" : ""}>上一页</button>
-      <span>第 ${payload.page} / ${payload.totalPages} 页</span>
-      <button class="ghost-button" type="button" data-page-action="next" ${payload.page >= payload.totalPages ? "disabled" : ""}>下一页</button>
-    </div>
-  `;
-  container.querySelectorAll("[data-page-action]").forEach((button) => {
-    button.addEventListener("click", () => {
-      const action = button.dataset.pageAction;
-      const nextPage = action === "prev" ? payload.page - 1 : payload.page + 1;
-      onPageChange(nextPage);
-    });
-  });
-}
-
-function getProfileUrl(row) {
-  const explicit = String(row["主页链接"] || "").trim();
-  if (explicit) return explicit;
-  const raw = String(row["达人ID"] || "").trim().replace(/^@+/, "");
-  return raw ? `https://www.tiktok.com/@${encodeURIComponent(raw)}` : "";
-}
-
-function renderOverview() {
-  const rows = filteredOverview();
-  elements.resultTitle.textContent = `${rows.length} 个 GMV重点达人`;
-  elements.resultSubtitle.textContent = `只展示 90天GMV 大于 0 的达人；全量池仅在后台保留数量和明细`;
-  renderTableHead(elements.overviewHead);
-  const pageData = paginateRows(rows, state.overviewPage, OVERVIEW_PAGE_SIZE);
-  state.overviewPage = pageData.page;
-  if (!rows.length) {
-    elements.overviewBody.innerHTML = `<tr><td colspan="${TABLE_COLUMNS.length + 1}"><div class="empty-state">当前筛选下没有匹配达人。</div></td></tr>`;
-    renderPagination(elements.overviewPagination, pageData, (page) => {
-      state.overviewPage = page;
+function renderTables(filtered) {
+  const gmvPage = paginateRows(filtered.gmvRows, app.filters.gmvPage, CREATOR_PAGE_SIZE);
+  app.filters.gmvPage = gmvPage.page;
+  renderCreatorTable({
+    head: elements.gmvHead,
+    body: elements.gmvBody,
+    pagination: elements.gmvPagination,
+    rows: gmvPage.rows,
+    total: gmvPage.total,
+    page: gmvPage.page,
+    totalPages: gmvPage.totalPages,
+    start: gmvPage.start,
+    end: gmvPage.end,
+    mode: "gmv",
+    onEdit: (creatorId) => {
+      const row = app.model.rowById.get(creatorId);
+      if (row) app.modalController.openEditModal(row);
+    },
+    onPageChange: (page) => {
+      app.filters.gmvPage = page;
       render();
-    });
-    return;
-  }
-  elements.overviewBody.innerHTML = pageData.rows
-    .map((row) => renderTableRow(row, "edit"))
-    .join("");
-  elements.overviewBody.querySelectorAll("[data-edit-id]").forEach((button) => {
-    button.addEventListener("click", () => {
-      const creator = renderedOverview.find((item) => item["达人ID"] === button.dataset.editId);
-      if (creator) openDetail(creator);
-    });
+    },
   });
-  renderPagination(elements.overviewPagination, pageData, (page) => {
-    state.overviewPage = page;
-    render();
-  });
-}
 
-function renderFocus() {
-  const rows = filteredFocus();
-  renderTableHead(elements.focusHead);
-  const pageData = paginateRows(rows, state.focusPage, FOCUS_PAGE_SIZE);
-  state.focusPage = pageData.page;
-  if (!rows.length) {
-    elements.focusBody.innerHTML = `<tr><td colspan="${TABLE_COLUMNS.length + 1}"><div class="empty-state">当前筛选下没有匹配的重点达人。</div></td></tr>`;
-    renderPagination(elements.focusPagination, pageData, (page) => {
-      state.focusPage = page;
+  const focusPage = paginateRows(filtered.focusRows, app.filters.focusPage, CREATOR_PAGE_SIZE);
+  app.filters.focusPage = focusPage.page;
+  renderCreatorTable({
+    head: elements.focusHead,
+    body: elements.focusBody,
+    pagination: elements.focusPagination,
+    rows: focusPage.rows,
+    total: focusPage.total,
+    page: focusPage.page,
+    totalPages: focusPage.totalPages,
+    start: focusPage.start,
+    end: focusPage.end,
+    mode: "focus",
+    onEdit: (creatorId) => {
+      const row = app.model.rowById.get(creatorId);
+      if (row) app.modalController.openEditModal(row);
+    },
+    onPageChange: (page) => {
+      app.filters.focusPage = page;
       render();
-    });
-    return;
-  }
-  elements.focusBody.innerHTML = pageData.rows
-    .map((row) => renderTableRow(row, "focus-edit"))
-    .join("");
-  elements.focusBody.querySelectorAll("[data-focus-edit-id]").forEach((button) => {
-    button.addEventListener("click", () => {
-      const creator = renderedFocus.find((item) => item["达人ID"] === button.dataset.focusEditId);
-      if (creator) openDetail(creator);
-    });
+    },
   });
-  renderPagination(elements.focusPagination, pageData, (page) => {
-    state.focusPage = page;
-    render();
+
+  renderRecordsTable({
+    head: elements.recordsHead,
+    body: elements.recordsBody,
+    rows: filtered.records,
   });
+
+  elements.gmvMeta.textContent = `当前筛选命中 ${filtered.gmvRows.length} 人`;
+  elements.focusMeta.textContent = `当前筛选命中 ${filtered.focusRows.length} 人`;
+  elements.recordsMeta.textContent = `当前筛选命中 ${filtered.records.length} 条`;
 }
 
-function renderRecords() {
-  const rows = filteredRecords();
-  if (!rows.length) {
-    elements.recordBody.innerHTML = '<tr><td colspan="7"><div class="empty-state">当前筛选下没有合作摘要。</div></td></tr>';
-    return;
-  }
-  elements.recordBody.innerHTML = rows
-    .map(
-      (row) => `
-      <tr>
-        <td>${escapeHtml(row["达人名称"])}</td>
-        <td>${escapeHtml(row["合作日期"]) || "-"}</td>
-        <td>${escapeHtml(row["产品"]) || "-"}</td>
-        <td>${escapeHtml(row["内容类型"]) || "-"}</td>
-        <td>${escapeHtml(row["是否出单(Y/N)"])}</td>
-        <td>${escapeHtml(row["是否复投(Y/N)"])}</td>
-        <td>${row["视频链接"] ? `<a class="creator-link" href="${escapeHtml(row["视频链接"])}" target="_blank" rel="noreferrer noopener">查看</a>` : "-"}</td>
-      </tr>
-    `
-    )
-    .join("");
-}
-
-function renderMetrics() {
-  elements.metricList.innerHTML = payload.metrics
-    .map(
-      (row) => `
-        <article class="metric-card">
-          <p class="metric-card__eyebrow">${escapeHtml(row["指标"])}</p>
-          <strong>${escapeHtml(row["数值"])}</strong>
-          <p>${escapeHtml(row["说明"])}</p>
-          <p class="subtle">${escapeHtml(row[""] || "")}</p>
-        </article>
-      `
-    )
-    .join("");
-}
-
-function renderSyncHealth() {
-  const sync = payload.syncHealth || {};
-  const stores = Array.isArray(sync.stores) ? sync.stores : [];
-  const cards = [
-    {
-      label: "自动化状态",
-      value: sync.automationStatus || "UNKNOWN",
-      note: sync.schedule || "未配置",
-      tone: sync.automationStatus === "ACTIVE" ? "ok" : "warn",
+function renderCockpitContent(filtered) {
+  renderCockpit({
+    storeHealthList: elements.storeHealthList,
+    poolHealthList: elements.poolHealthList,
+    activityList: elements.activityList,
+    quickActions: elements.quickActions,
+    metricList: elements.metricList,
+    assumptionList: elements.assumptionList,
+    syncHealth: app.payload.syncHealth || {},
+    stats: app.payload.stats || {},
+    metricNotes: buildMetricNotes(app.payload.metrics || []),
+    assumptions: buildAssumptionNotes(app.payload.assumptions || []),
+    onOpenUpload: () => app.modalController.openUploadModal(),
+    onOpenManualSync: () => app.modalController.openManualSyncModal(),
+    onOpenSyncSettings: () => app.modalController.openSyncSettingsModal(),
+    filteredCounts: {
+      gmv: filtered.gmvRows.length,
+      focus: filtered.focusRows.length,
     },
-    {
-      label: "采集入库状态",
-      value: sync.dataSyncStatus || "未记录",
-      note: sync.dataSyncNote || "浏览器拉起、导出、标准化与数据库入库",
-      tone: String(sync.dataSyncStatus || "").includes("失败")
-        ? "warn"
-        : String(sync.dataSyncStatus || "").includes("成功")
-          ? "ok"
-          : "neutral",
-    },
-    {
-      label: "页面重建状态",
-      value: sync.rebuildStatus || "未记录",
-      note: sync.rebuildNote || "工作簿和页面快照状态",
-      tone: String(sync.rebuildStatus || "").includes("失败")
-        ? "warn"
-        : String(sync.rebuildStatus || "").includes("成功")
-          ? "ok"
-          : "neutral",
-    },
-    {
-      label: "上次成功同步",
-      value: sync.lastSuccessRunAt || "未记录",
-      note: `最近运行 ${sync.lastRunAt || "未记录"}`,
-      tone: "neutral",
-    },
-    {
-      label: "最新单店更新到",
-      value: sync.latestDataDate || "未记录",
-      note: "四店中任一店铺已同步到的最新日期",
-      tone: "neutral",
-    },
-    {
-      label: "四店统一更新到",
-      value: sync.allStoresSyncedThrough || "未记录",
-      note: "当前四店共同已覆盖到的最新日期",
-      tone: "neutral",
-    },
-    {
-      label: "当前待同步日期",
-      value: sync.nextSyncDate || "未记录",
-      note: sync.summary || "",
-      tone: "neutral",
-    },
-    {
-      label: "最近失败原因",
-      value: sync.lastFailure || "无",
-      note: "无失败时显示为无",
-      tone: sync.lastFailure && sync.lastFailure !== "无" ? "warn" : "ok",
-    },
-    ...stores.map((store) => ({
-      label: `${store.store} 店铺`,
-      value: store.value || "未记录",
-      note: [store.note, store.error].filter(Boolean).join(" · "),
-      tone: String(store.value || "").includes("失败") ? "warn" : "neutral",
-    })),
-  ];
-  elements.syncHealthGrid.innerHTML = cards
-    .map(
-      (card) => `
-        <article class="sync-card sync-card--${escapeHtml(card.tone)}">
-          <p class="sync-card__eyebrow">${escapeHtml(card.label)}</p>
-          <strong>${escapeHtml(card.value)}</strong>
-          <p>${escapeHtml(card.note || "")}</p>
-        </article>
-      `
-    )
-    .join("");
-}
-
-function renderTableHead(node) {
-  if (!node) return;
-  node.innerHTML = `
-    <tr>
-      ${TABLE_COLUMNS.map((column) => `<th>${escapeHtml(column)}</th>`).join("")}
-      <th>操作</th>
-    </tr>
-  `;
-}
-
-function renderCollapsedRemark(value) {
-  const text = String(value || "").trim();
-  if (!text) return "-";
-  const summary = text.length > 18 ? `${text.slice(0, 18)}...` : text;
-  return `
-    <details class="remark-toggle">
-      <summary>${escapeHtml(summary)}</summary>
-      <div class="remark-toggle__content">${escapeHtml(text)}</div>
-    </details>
-  `;
-}
-
-function renderValueCell(row, column) {
-  const value = row[column];
-  if (column === "达人名称") {
-    const url = getProfileUrl(row);
-    return `
-      <div class="creator-name">
-        <a class="creator-link" href="${escapeHtml(url)}" target="_blank" rel="noreferrer noopener">${escapeHtml(value)}</a>
-      </div>
-    `;
-  }
-  if (column === "品牌标签") {
-    return splitMultiValue(value).map((item) => `<span class="pill is-warm">${escapeHtml(item)}</span>`).join("") || "-";
-  }
-  if (column === "达人分层(L0/L1/L2/L3)") {
-    return value ? `<span class="pill">${escapeHtml(value)}</span>` : "-";
-  }
-  if (column === "当前合作状态") {
-    return value
-      ? `<span class="pill ${value === "在合作" ? "is-warm" : "is-muted"}">${escapeHtml(value)}</span>`
-      : "-";
-  }
-  if (column === "优先级") {
-    return value
-      ? `<span class="pill ${value === "高" ? "is-warm" : value === "中" ? "" : "is-muted"}">${escapeHtml(value)}</span>`
-      : "-";
-  }
-  if (["历史总GMV", "90天GMV", "近30天发布视频gmv"].includes(column)) {
-    return escapeHtml(formatNumber(value));
-  }
-  if (column === "备注") {
-    return renderCollapsedRemark(value);
-  }
-  return escapeHtml(value || "-");
-}
-
-function renderTableRow(row, mode) {
-  const actionAttr = mode === "focus-edit" ? "data-focus-edit-id" : "data-edit-id";
-  return `
-    <tr>
-      ${TABLE_COLUMNS.map((column) => `<td>${renderValueCell(row, column)}</td>`).join("")}
-      <td><button class="ghost-button table-action" type="button" ${actionAttr}="${escapeHtml(row["达人ID"])}">编辑</button></td>
-    </tr>
-  `;
+  });
 }
 
 function render() {
-  const overviewRows = filteredOverview();
-  const focusRows = filteredFocus();
-  renderStats(overviewRows, focusRows);
-  renderOverview();
-  renderFocus();
-  renderRecords();
-  renderSyncHealth();
-  renderMetrics();
+  syncToolbarVisibility();
+  const filtered = buildFilteredData();
+
+  renderStatusStrip(elements.statusStrip, buildStatusItems(app.payload.syncHealth || {}));
+  renderSummaryCards(
+    elements.summaryGrid,
+    buildSummaryCards({
+      stats: app.payload.stats || {},
+      activeTab: app.filters.activeTab,
+      filteredCounts: filtered,
+    })
+  );
+  renderTables(filtered);
+  renderCockpitContent(filtered);
 }
 
-function renderInputField(label, value, type, placeholder, hint = "") {
-  return `
-    <label class="field">
-      <span>${escapeHtml(label)}</span>
-      <input name="${escapeHtml(label)}" type="${type}" value="${escapeHtml(value || "")}" placeholder="${escapeHtml(placeholder)}" />
-      ${hint ? `<span class="field-hint">${escapeHtml(hint)}</span>` : ""}
-    </label>
-  `;
-}
-
-function renderTextareaField(label, value, placeholder, hint = "") {
-  return `
-    <label class="field is-wide">
-      <span>${escapeHtml(label)}</span>
-      <textarea name="${escapeHtml(label)}" placeholder="${escapeHtml(placeholder)}">${escapeHtml(value || "")}</textarea>
-      ${hint ? `<span class="field-hint">${escapeHtml(hint)}</span>` : ""}
-    </label>
-  `;
-}
-
-function renderSelectField(label, value, options) {
-  const mergedOptions = value && !options.includes(value) ? [value, ...options] : options;
-  return `
-    <label class="field">
-      <span>${escapeHtml(label)}</span>
-      <select name="${escapeHtml(label)}">
-        <option value="">请选择</option>
-        ${mergedOptions
-          .map((option) => `<option value="${escapeHtml(option)}" ${option === value ? "selected" : ""}>${escapeHtml(option)}</option>`)
-          .join("")}
-      </select>
-    </label>
-  `;
-}
-
-function openDetail(row) {
-  state.activeCreatorId = row["达人ID"];
-  const url = getProfileUrl(row);
-  elements.detailTitle.innerHTML = url
-    ? `<a class="creator-link creator-link--detail" href="${escapeHtml(url)}" target="_blank" rel="noreferrer noopener">${escapeHtml(row["达人名称"])}</a>`
-    : escapeHtml(row["达人名称"]);
-  elements.detailSubtitle.textContent = `@${row["达人ID"]} · ${row["达人分层(L0/L1/L2/L3)"] || "-"} · ${row["当前合作状态"] || "-"}`;
-
-  const currentLink = row["复投产品链接"] || "";
-  const currentPid = row["复投产品PID"] || parsePidFromText(currentLink) || "";
-
-  elements.detailBody.innerHTML = `
-    <article class="detail-card">
-      <h3>当前表现</h3>
-      <p><strong>历史总GMV：</strong>${escapeHtml(formatNumber(row["历史总GMV"]))}</p>
-      <p><strong>90天GMV：</strong>${escapeHtml(formatNumber(row["90天GMV"]))}</p>
-      <p><strong>近30天发布视频GMV：</strong>${escapeHtml(formatNumber(row["近30天发布视频gmv"]))}</p>
-      <p><strong>最近合作日期：</strong>${escapeHtml(row["最近合作日期"] || "-")}</p>
-      <p><strong>距离上次发布天数：</strong>${escapeHtml(row["距离上次发布天数"] || "-")}</p>
-    </article>
-    <article class="detail-card">
-      <h3>复投判断</h3>
-      <p><strong>是否进入复投：</strong>${escapeHtml(row["是否进入复投(Y/N)"] || "-")}</p>
-      <p><strong>是否超时未合作：</strong>${escapeHtml(row["是否超时未合作"] || "-")}</p>
-      <p><strong>当前合作状态：</strong>${escapeHtml(row["当前合作状态"] || "-")}</p>
-      <p><strong>达人类型：</strong>${escapeHtml(row["达人类型"] || "-")}</p>
-      <p><strong>品牌标签：</strong>${escapeHtml(row["品牌标签"] || "-")}</p>
-    </article>
-    <article class="detail-card is-wide">
-      <h3>人工维护</h3>
-      <form id="core-editor-form" class="editor-grid">
-        ${renderInputField("复投产品链接", currentLink, "text", "粘贴产品链接或直接输入 PID", "最高优先级，系统会自动从链接里提取 PID")}
-        ${renderInputField("复投产品PID", currentPid, "text", "自动识别或手工输入 PID", "支持纯数字 PID，也支持从产品链接自动提取")}
-        ${renderSelectField("优先级", row["优先级"] || "", ["高", "中", "低"])}
-        ${renderInputField("负责人", row["负责人"] || "", "text", "负责人")}
-        ${renderInputField("截止日期", row["截止日期"] || "", "date", "")}
-        ${renderTextareaField("下一步动作", row["下一步动作"] || "", "填写下一步运营动作")}
-        ${renderTextareaField("备注", row["备注"] || "", "补充说明")}
-        <div class="editor-actions is-wide">
-          <p id="core-editor-status" class="editor-meta">保存后优先写入共享库；若未填写编辑人和口令，将暂存在当前浏览器。</p>
-          <button class="solid-button" type="submit">保存当前达人</button>
-        </div>
-      </form>
-    </article>
-  `;
-
-  const form = document.querySelector("#core-editor-form");
-  const linkInput = form.querySelector('input[name="复投产品链接"]');
-  const pidInput = form.querySelector('input[name="复投产品PID"]');
-  const statusNode = document.querySelector("#core-editor-status");
-
-  const syncPidFromLink = () => {
-    const parsed = parsePidFromText(linkInput.value);
-    if (parsed && !pidInput.value.trim()) {
-      pidInput.value = parsed;
-    }
-    statusNode.textContent = parsed
-      ? `当前已识别 PID：${parsed}`
-      : "保存后优先写入共享库；若未填写编辑人和口令，将暂存在当前浏览器。";
-  };
-  linkInput.addEventListener("input", syncPidFromLink);
-  syncPidFromLink();
-
-  form.addEventListener("submit", async (event) => {
-    event.preventDefault();
-    await saveCreatorFromForm(new FormData(form));
+function rebuildModel() {
+  app.model = buildDashboardModel({
+    payload: app.payload,
+    remoteCoreOverridesById: app.syncService.getRemoteCoreOverrides(),
+    localCoreOverridesById: app.syncService.getLocalCoreOverrides(),
   });
+}
 
-  if (!elements.detailModal.open) {
-    elements.detailModal.showModal();
+async function refreshOverrides() {
+  try {
+    await app.syncService.refreshRemoteOverrides();
+    updateCloudStatus(true, "已连接共享库");
+  } catch (error) {
+    updateCloudStatus(false, `共享读取失败，当前仅使用本机暂存`);
+    app.syncService.setStatusMessage(`共享读取失败：${formatSyncError(error)}`);
   }
+  rebuildModel();
+  renderCreatorFilterOptions();
+  render();
 }
-
-function updateSyncInputs() {
-  elements.coreEditorName.value = syncSettings.editorName || "";
-  elements.coreWritePasscode.value = syncSettings.writePasscode || "";
-  elements.coreEditorName.autocomplete = "off";
-  elements.coreWritePasscode.autocomplete = "new-password";
-}
-
-window.addEventListener("pageshow", () => {
-  updateSyncInputs();
-});
 
 function setupTabs() {
-  elements.tabs.forEach((tab) => {
-    tab.addEventListener("click", () => {
-      state.activeTab = tab.dataset.tab;
-      elements.tabs.forEach((item) => item.classList.toggle("is-active", item === tab));
-      elements.panels.forEach((panel) => panel.classList.toggle("is-active", panel.dataset.panel === state.activeTab));
+  elements.tabs.forEach((button) => {
+    button.addEventListener("click", () => {
+      const tab = button.dataset.tab;
+      app.filters.activeTab = tab;
+      elements.tabs.forEach((item) => item.classList.toggle("is-active", item === button));
+      elements.panels.forEach((panel) => panel.classList.toggle("is-active", panel.dataset.panel === tab));
       render();
     });
   });
@@ -906,247 +246,94 @@ function setupTabs() {
 
 function setupFilters() {
   elements.searchInput.addEventListener("input", (event) => {
-    state.search = event.target.value.trim().toLowerCase();
-    state.overviewPage = 1;
-    state.focusPage = 1;
+    app.filters.search = event.target.value.trim().toLowerCase();
+    app.filters.gmvPage = 1;
+    app.filters.focusPage = 1;
     render();
   });
+  elements.recordSearchInput.addEventListener("input", (event) => {
+    app.filters.recordSearch = event.target.value.trim().toLowerCase();
+    render();
+  });
+  elements.quickFilterButtons.forEach((button) => {
+    button.addEventListener("click", () => {
+      app.filters.quickFilter = button.dataset.quickFilter || "all";
+      elements.quickFilterButtons.forEach((item) => item.classList.toggle("is-active", item === button));
+      app.filters.gmvPage = 1;
+      app.filters.focusPage = 1;
+      render();
+    });
+  });
   [
-    ["levelFilter", "level"],
-    ["statusFilter", "status"],
-    ["priorityFilter", "priority"],
-    ["platformFilter", "platform"],
-    ["repurchaseFilter", "repurchase"],
-    ["brandFilter", "brandTag"],
-  ].forEach(([key, stateKey]) => {
-    elements[key].addEventListener("change", (event) => {
-      state[stateKey] = event.target.value;
-      state.overviewPage = 1;
-      state.focusPage = 1;
+    [elements.brandFilter, "brandTag"],
+    [elements.levelFilter, "level"],
+    [elements.statusFilter, "status"],
+    [elements.priorityFilter, "priority"],
+    [elements.platformFilter, "platform"],
+    [elements.repurchaseFilter, "repurchase"],
+    [elements.recordStoreFilter, "recordStore"],
+  ].forEach(([element, key]) => {
+    element.addEventListener("change", (event) => {
+      app.filters[key] = event.target.value;
+      app.filters.gmvPage = 1;
+      app.filters.focusPage = 1;
       render();
     });
   });
 }
 
-function rebuildWorkingRows() {
-  renderedOverview = baseOverview.map((item) => mergeCoreValues(item));
-  renderedFocus = baseFocus.map((item) => mergeCoreValues(item));
-}
-
-async function refreshAfterMutation() {
-  try {
-    await loadRemoteOverrides();
-  } catch (error) {
-    setSyncStatus(`云端刷新失败：${formatSyncError(error)}`);
-  }
-  rebuildWorkingRows();
-  populateFilters();
-  render();
-  const current = [...renderedOverview, ...renderedFocus].find((item) => item["达人ID"] === state.activeCreatorId);
-  if (current && elements.detailModal.open) {
-    openDetail(current);
-  }
-}
-
-function buildMergedOverridePayload(creatorId, nextValues) {
-  const merged = { ...(remoteRawFieldsById[creatorId] || {}) };
-  CORE_EDIT_FIELDS.forEach((config) => {
-    const nextValue = String(nextValues[config.label] || "").trim();
-    if (nextValue) {
-      merged[config.remoteKey] = nextValue;
-    } else {
-      delete merged[config.remoteKey];
-    }
-  });
-  return merged;
-}
-
-async function remoteUpsertCreatorOverride(creatorId, mergedFields) {
-  return supabaseRequest("/rpc/upsert_creator_override", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      p_workspace_id: syncSettings.workspaceId,
-      p_passcode: syncSettings.writePasscode,
-      p_editor_name: syncSettings.editorName,
-      p_kol_id: creatorId,
-      p_fields: mergedFields,
-    }),
-  });
-}
-
-function collectFormValues(formData) {
-  const values = {};
-  CORE_EDIT_FIELDS.forEach((config) => {
-    values[config.label] = String(formData.get(config.label) || "").trim();
-  });
-  if (!values["复投产品PID"] && values["复投产品链接"]) {
-    values["复投产品PID"] = parsePidFromText(values["复投产品链接"]);
-  }
-  return values;
-}
-
-async function saveCreatorFromForm(formData) {
-  const creatorId = state.activeCreatorId;
-  const values = collectFormValues(formData);
-  if (!syncSettings.editorName || !syncSettings.writePasscode) {
-    localCoreOverridesById[creatorId] = values;
-    persistLocalOverrides(localCoreOverridesById);
-    rebuildWorkingRows();
-    render();
-    const current = [...renderedOverview, ...renderedFocus].find((item) => item["达人ID"] === creatorId);
-    if (current) openDetail(current);
-    setSyncStatus(`未填写编辑人或口令，已暂存到当前浏览器：${creatorId}`);
-    return;
-  }
-  try {
-    const mergedFields = buildMergedOverridePayload(creatorId, values);
-    await remoteUpsertCreatorOverride(creatorId, mergedFields);
-    delete localCoreOverridesById[creatorId];
-    persistLocalOverrides(localCoreOverridesById);
-    await refreshAfterMutation();
-    setSyncStatus(`已保存共享字段：${creatorId}`);
-  } catch (error) {
-    localCoreOverridesById[creatorId] = values;
-    persistLocalOverrides(localCoreOverridesById);
-    rebuildWorkingRows();
-    render();
-    const current = [...renderedOverview, ...renderedFocus].find((item) => item["达人ID"] === creatorId);
-    if (current) openDetail(current);
-    setSyncStatus(`云端保存失败，已回退到本机暂存：${formatSyncError(error)}`);
-  }
-}
-
-function setupSyncPanel() {
-  elements.coreSaveSync.addEventListener("click", () => {
-    syncSettings = normalizeSyncSettings({
-      ...syncSettings,
-      editorName: elements.coreEditorName.value,
-      writePasscode: elements.coreWritePasscode.value,
-    });
-    persistSyncSettings(syncSettings);
-    setSyncStatus(syncSettings.editorName ? `已保存编辑身份：${syncSettings.editorName}` : "已保存本机设置，可继续只读共享数据。");
-  });
-  elements.coreRefreshCloud.addEventListener("click", async () => {
-    try {
-      await refreshAfterMutation();
-      setSyncStatus(`已刷新工作区 ${syncSettings.workspaceId} 的共享数据。`);
-    } catch (error) {
-      setSyncStatus(`刷新失败：${formatSyncError(error)}`);
-    }
-  });
-  elements.coreClearSync.addEventListener("click", () => {
-    syncSettings = normalizeSyncSettings(PUBLIC_READ_SYNC_SETTINGS);
-    localCoreOverridesById = {};
-    persistLocalOverrides(localCoreOverridesById);
-    persistSyncSettings(syncSettings);
-    updateSyncInputs();
-    rebuildWorkingRows();
-    render();
-    setSyncStatus("已清空本机编辑身份与本地暂存，继续只读共享数据。");
-  });
-}
-
-async function handleCooperationUpload() {
-  if (!canWriteShared()) {
-    setUploadStatus("请先填写编辑人和写入口令，再上传合作表到云端。");
-    return;
-  }
-  const file = elements.coopUploadInput.files?.[0];
-  if (!file) {
-    setUploadStatus("请先选择达人合作表格。");
-    return;
-  }
-  try {
-    setUploadStatus("正在解析合作表并上传到云端...");
-    const rows = normalizeCooperationUploadRows(await parseWorkbookRows(file));
-    if (!rows.length) {
-      throw new Error("合作表没有可上传的数据，请检查表头是否正确。");
-    }
-    const result = await replaceCloudUpload("replace_tiktok_cooperation_upload", file.name, rows);
-    const inserted = Number(result?.inserted ?? 0);
-    if (inserted <= 0) {
-      throw new Error("合作表接口已响应，但云端写入 0 行，请检查表头和文件内容。");
-    }
-    setUploadStatus(`合作表上传完成：${inserted} 行已同步到云端，后续更新会优先读取云端合作表。`);
-  } catch (error) {
-    setUploadStatus(`合作表上传失败：${formatSyncError(error)}`);
-  }
-}
-
-async function handleSkuUpload() {
-  if (!canWriteShared()) {
-    setUploadStatus("请先填写编辑人和写入口令，再上传 SPU/SKU 表到云端。");
-    return;
-  }
-  const file = elements.skuUploadInput.files?.[0];
-  if (!file) {
-    setUploadStatus("请先选择 SPU / SKU 对应表格。");
-    return;
-  }
-  try {
-    setUploadStatus("正在解析 SPU/SKU 表并上传到云端...");
-    const rows = normalizeSkuUploadRows(await parseWorkbookRows(file));
-    if (!rows.length) {
-      throw new Error("SPU/SKU 表没有可上传的数据，请检查表头是否正确。");
-    }
-    const result = await replaceCloudUpload("replace_tiktok_product_sku_cost_upload", file.name, rows);
-    const inserted = Number(result?.inserted ?? 0);
-    if (inserted <= 0) {
-      throw new Error("SPU/SKU 接口已响应，但云端写入 0 行，请检查表头和文件内容。");
-    }
-    setUploadStatus(`SPU/SKU 表上传完成：${inserted} 行已同步到云端，后续更新会优先读取云端产品表。`);
-  } catch (error) {
-    setUploadStatus(`SPU/SKU 表上传失败：${formatSyncError(error)}`);
-  }
-}
-
-function setupUploadPanel() {
-  elements.coopUploadButton?.addEventListener("click", () => {
-    handleCooperationUpload();
-  });
-  elements.skuUploadButton?.addEventListener("click", () => {
-    handleSkuUpload();
-  });
+function setupTopActions() {
+  elements.openUploadModal.addEventListener("click", () => app.modalController.openUploadModal());
+  elements.openSyncSettings.addEventListener("click", () => app.modalController.openSyncSettingsModal());
+  elements.openManualSync.addEventListener("click", () => app.modalController.openManualSyncModal());
 }
 
 async function init() {
-  if (window.__CORE_CREATOR_DASHBOARD__) {
-    payload = window.__CORE_CREATOR_DASHBOARD__;
-  } else {
-    const response = await fetch(`./data/core_creator_dashboard.json?ts=${Date.now()}`, { cache: "no-store" });
-    if (!response.ok) throw new Error(`加载失败：${response.status}`);
-    payload = await response.json();
-  }
+  app.payload = await loadDashboardPayload();
+  elements.generatedAt.textContent = `数据生成时间 ${app.payload.generatedAt || "未知"} · 数据真源 ${app.payload.source || "unknown"}`;
 
-  syncSettings = loadSyncSettings();
-  localCoreOverridesById = loadLocalOverrides();
-  updateSyncInputs();
-  window.setTimeout(updateSyncInputs, 0);
+  app.syncService = createSyncService();
+  app.syncService.initialize();
 
-  baseOverview = (payload.gmvFocusPool || []).map((item) => ({ ...item }));
-  baseFocus = payload.focusPool.map((item) => ({ ...item }));
   try {
-    await loadRemoteOverrides();
-    setSyncStatus(`已连接工作区 ${syncSettings.workspaceId}，当前可读共享维护结果。`);
+    await app.syncService.refreshRemoteOverrides();
+    updateCloudStatus(true, "已连接共享库");
   } catch (error) {
-    setSyncStatus(`共享读取失败，当前仅使用本机暂存：${formatSyncError(error)}`);
+    updateCloudStatus(false, "共享读取失败，当前仅使用本机暂存");
+    app.syncService.setStatusMessage(`共享读取失败：${formatSyncError(error)}`);
   }
-  rebuildWorkingRows();
 
-  elements.generatedAt.textContent = `数据生成时间 ${payload.generatedAt}`;
-  populateFilters();
-  renderAssumptions();
+  rebuildModel();
+  renderCreatorFilterOptions();
+
+  app.modalController = createModalController({
+    syncService: app.syncService,
+    getCreatorById: (creatorId) => app.model.rowById.get(creatorId),
+    getFocusMembership: (creatorId) => app.model.gmvPoolIds.has(creatorId),
+    onSaved: async () => {
+      rebuildModel();
+      render();
+    },
+    onRefreshRequested: async () => {
+      await refreshOverrides();
+    },
+  });
+
   setupTabs();
   setupFilters();
-  setupSyncPanel();
-  setupUploadPanel();
-  elements.closeModal.addEventListener("click", () => elements.detailModal.close());
+  setupTopActions();
   render();
 }
 
 init().catch((error) => {
-  elements.generatedAt.textContent = "数据加载失败";
-  elements.overviewBody.innerHTML = `<tr><td colspan="${TABLE_COLUMNS.length + 1}"><div class="empty-state">核心看板加载失败，请稍后重试。</div></td></tr>`;
   console.error(error);
+  elements.generatedAt.textContent = "页面加载失败";
+  updateCloudStatus(false, "页面初始化失败");
+  elements.summaryGrid.innerHTML = `
+    <article class="summary-card summary-card--error">
+      <p class="summary-card__label">初始化失败</p>
+      <strong class="summary-card__value">请稍后刷新</strong>
+      <p class="summary-card__note">${String(error?.message || error || "未知错误")}</p>
+    </article>
+  `;
 });
