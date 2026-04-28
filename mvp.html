@@ -523,7 +523,7 @@
     <section class="panel hero">
       <div class="hero-top">
         <div>
-          <div class="eyebrow">4 Brands / 4 Data Types / v2</div>
+          <div class="eyebrow">4 Brands / 4 Data Types / v3</div>
           <h1>达人数据监控后台 MVP</h1>
           <p>支持 `Sparco / letme / icyee / stypro` 多品牌多文件上传。系统会先按文件类型自动拼接，再分别构建“交易监控”“播放监控”“播放-交易联动分析”三个视图。</p>
         </div>
@@ -918,10 +918,33 @@
     }
 
     async function readWorkbookArrays(file) {
-      const buffer = await file.arrayBuffer();
-      const workbook = XLSX.read(buffer, { type: "array" });
-      const sheet = workbook.Sheets[workbook.SheetNames[0]];
-      return XLSX.utils.sheet_to_json(sheet, { header: 1, defval: "" });
+      try {
+        const buffer = file?.buffer instanceof ArrayBuffer ? file.buffer : await file.arrayBuffer();
+        const workbook = XLSX.read(buffer, { type: "array" });
+        const sheet = workbook.Sheets[workbook.SheetNames[0]];
+        return XLSX.utils.sheet_to_json(sheet, { header: 1, defval: "" });
+      } catch (error) {
+        const fileName = file?.name || "未命名文件";
+        throw new Error(`文件「${fileName}」读取失败。通常是浏览器在上传后失去了对原始文件的访问权限。请重新选择该文件后再试；如果文件来自 iCloud 或下载目录，请先确认文件已完整保存在本地。`);
+      }
+    }
+
+    async function materializeFiles(fileList) {
+      const items = [];
+      const failures = [];
+      for (const file of [...fileList]) {
+        try {
+          items.push({
+            name: file.name,
+            size: file.size,
+            lastModified: file.lastModified,
+            buffer: await file.arrayBuffer()
+          });
+        } catch (error) {
+          failures.push({ name: file.name, error });
+        }
+      }
+      return { items, failures };
     }
 
     function findHeaderRow(matrix, requiredHeaders) {
@@ -2602,11 +2625,44 @@
     }
 
     function bindFileInput(input, key, statusNode, label) {
-      input.addEventListener("change", () => {
-        state.files[key] = [...input.files];
-        const text = state.files[key].length ? `${label} ${state.files[key].length} 个文件` : "等待上传";
-        setStatus(statusNode, state.files[key].length ? "ready" : "wait", text);
-        updateProcessState();
+      input.addEventListener("change", async () => {
+        const selectedFiles = input.files;
+        if (!selectedFiles?.length) {
+          state.files[key] = [];
+          setStatus(statusNode, "wait", "等待上传");
+          updateProcessState();
+          return;
+        }
+
+        input.disabled = true;
+        refs.processBtn.disabled = true;
+        setStatus(statusNode, "wait", `正在缓存 ${label}...`);
+
+        try {
+          const { items, failures } = await materializeFiles(selectedFiles);
+          state.files[key] = items;
+
+          if (failures.length) {
+            const failureNames = failures.map((item) => `「${item.name}」`).join("、");
+            const statusType = items.length ? "warn" : "wait";
+            const statusText = items.length
+              ? `${label} 已缓存 ${items.length} 个，${failures.length} 个失败`
+              : `${label} 读取失败`;
+            setStatus(statusNode, statusType, statusText);
+            throw new Error(`${label} 中有文件读取失败：${failureNames}。请重新选择这些文件后再试；如果文件来自 iCloud 或下载目录，请先确认文件已完整下载到本地。`);
+          }
+
+          const text = items.length ? `${label} 已缓存 ${items.length} 个文件` : "等待上传";
+          setStatus(statusNode, items.length ? "ready" : "wait", text);
+        } catch (error) {
+          state.files[key] = [];
+          setStatus(statusNode, "warn", `${label} 读取失败，请重选`);
+          alert(error.message);
+        } finally {
+          input.value = "";
+          input.disabled = false;
+          updateProcessState();
+        }
       });
     }
 
