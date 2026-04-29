@@ -157,10 +157,12 @@
       color: white;
     }
 
-    button.secondary {
+    button.secondary,
+    .button-like.secondary {
       background: rgba(255, 255, 255, 0.86);
       color: var(--ink);
       border: 1px solid var(--line);
+      text-decoration: none;
     }
 
     .tab-btn {
@@ -523,11 +525,12 @@
     <section class="panel hero">
       <div class="hero-top">
         <div>
-          <div class="eyebrow">4 Brands / 4 Data Types / v3</div>
+          <div class="eyebrow">4 Brands / 4 Data Types / v4</div>
           <h1>达人数据监控后台 MVP</h1>
-          <p>支持 `Sparco / letme / icyee / stypro` 多品牌多文件上传。系统会先按文件类型自动拼接，再分别构建“交易监控”“播放监控”“播放-交易联动分析”三个视图。</p>
+          <p>支持 `Sparco / letme / icyee / stypro` 多品牌多文件上传。系统会优先读取线上生命周期映射和达人等级映射；如果线上暂时不可用，仍可通过本地维表兜底生成结果。</p>
         </div>
         <div class="hero-actions">
+          <a class="button-like secondary" href="./mapping_admin.html" target="_blank" rel="noreferrer">维护在线映射</a>
           <button id="processBtn" disabled>生成监控结果</button>
           <button id="downloadBtn" class="secondary" disabled>下载当前视图 CSV</button>
         </div>
@@ -718,6 +721,11 @@
       refund: "当前视图：Refund 监控，适合看达人和视频两个层级的退款金额、退款件数、退货率。",
       linkage: "当前视图：播放-交易联动口径，适合看高播放低转化、低播放高转化以及视频联动效果。"
     };
+    const PUBLIC_READ_SYNC_SETTINGS = {
+      supabaseUrl: "https://sbznfjnsirajqkkcwayj.supabase.co",
+      anonKey: "sb_publishable_tM67K7Mi1qDUkemhgzDuGg_dsdwitBT",
+      workspaceId: "creator-dashboard-prod"
+    };
 
     const state = {
       currentView: "transaction",
@@ -736,6 +744,19 @@
         lifecycleRows: [],
         creatorRows: []
       },
+      remote: {
+        lifecycleRows: [],
+        creatorRows: [],
+        status: {
+          lifecycle: "idle",
+          creator: "idle"
+        },
+        errors: {
+          lifecycle: "",
+          creator: ""
+        },
+        lastLoadedAt: ""
+      },
       merged: {
         transactionRows: [],
         performanceRows: [],
@@ -745,7 +766,11 @@
       },
       filteredRows: [],
       summary: null,
-      refundSourceRows: []
+      refundSourceRows: [],
+      sourceInfo: {
+        lifecycle: "未初始化",
+        creator: "未初始化"
+      }
     };
 
     const refs = {
@@ -847,6 +872,107 @@
         if (fileHit !== "UNKNOWN") return fileHit;
       }
       return "UNKNOWN";
+    }
+
+    function buildSupabaseHeaders(extra = {}) {
+      return {
+        apikey: PUBLIC_READ_SYNC_SETTINGS.anonKey,
+        Authorization: `Bearer ${PUBLIC_READ_SYNC_SETTINGS.anonKey}`,
+        ...extra
+      };
+    }
+
+    async function supabaseRequest(path, options = {}) {
+      const { headers = {}, ...rest } = options;
+      const response = await fetch(`${PUBLIC_READ_SYNC_SETTINGS.supabaseUrl}/rest/v1${path}`, {
+        ...rest,
+        headers: buildSupabaseHeaders(headers)
+      });
+      if (!response.ok) {
+        const text = await response.text();
+        throw new Error(text || `Supabase ${response.status}`);
+      }
+      if (response.status === 204) return null;
+      return response.json();
+    }
+
+    async function fetchAllSupabaseRows(table, select) {
+      const workspace = encodeURIComponent(PUBLIC_READ_SYNC_SETTINGS.workspaceId);
+      const limit = 1000;
+      const rows = [];
+      let offset = 0;
+      while (true) {
+        const batch = await supabaseRequest(
+          `/${table}?workspace_id=eq.${workspace}&select=${encodeURIComponent(select)}&limit=${limit}&offset=${offset}`
+        );
+        if (!Array.isArray(batch) || !batch.length) break;
+        rows.push(...batch);
+        if (batch.length < limit) break;
+        offset += limit;
+      }
+      return rows;
+    }
+
+    function normalizeRemoteLifecycleRow(row) {
+      const pid = String(row.pid || "").trim();
+      if (!/^\d{10,}$/.test(pid)) return null;
+      const productNameRaw = String(row.product_name || "").trim();
+      const productNameCn = String(row.product_name_cn || "").trim();
+      return {
+        brand: resolveBrand(row.brand, productNameRaw, productNameCn),
+        pid,
+        product_period: String(row.product_period || "").trim(),
+        product_name_cn: productNameCn,
+        product_name_raw: productNameRaw
+      };
+    }
+
+    function normalizeRemoteCreatorRow(row) {
+      const creator = String(row.creator_name || "").trim();
+      if (!creator) return null;
+      return {
+        brand: resolveBrand(row.brand),
+        creator_name: creator,
+        creator_level: String(row.creator_level || "L3").trim() || "L3"
+      };
+    }
+
+    async function refreshRemoteMappings({ silent = false } = {}) {
+      const results = await Promise.allSettled([
+        fetchAllSupabaseRows("product_lifecycle_map", "pid,brand,product_period,product_name,product_name_cn,updated_at"),
+        fetchAllSupabaseRows("creator_level_map", "brand,creator_name,creator_level,updated_at")
+      ]);
+
+      const [lifecycleResult, creatorResult] = results;
+      if (lifecycleResult.status === "fulfilled") {
+        state.remote.lifecycleRows = lifecycleResult.value.map(normalizeRemoteLifecycleRow).filter(Boolean);
+        state.remote.status.lifecycle = state.remote.lifecycleRows.length ? "ready" : "empty";
+        state.remote.errors.lifecycle = "";
+        state.sourceInfo.lifecycle = state.remote.lifecycleRows.length ? `线上映射 ${formatInt(state.remote.lifecycleRows.length)} 条` : "线上为空";
+      } else {
+        state.remote.lifecycleRows = [];
+        state.remote.status.lifecycle = "error";
+        state.remote.errors.lifecycle = String(lifecycleResult.reason?.message || lifecycleResult.reason || "线上生命周期映射读取失败");
+        state.sourceInfo.lifecycle = state.raw.lifecycleRows.length ? `本地上传 ${formatInt(state.raw.lifecycleRows.length)} 条` : "线上不可用";
+      }
+
+      if (creatorResult.status === "fulfilled") {
+        state.remote.creatorRows = creatorResult.value.map(normalizeRemoteCreatorRow).filter(Boolean);
+        state.remote.status.creator = state.remote.creatorRows.length ? "ready" : "empty";
+        state.remote.errors.creator = "";
+        state.sourceInfo.creator = state.remote.creatorRows.length ? `线上映射 ${formatInt(state.remote.creatorRows.length)} 条` : "线上为空";
+      } else {
+        state.remote.creatorRows = [];
+        state.remote.status.creator = "error";
+        state.remote.errors.creator = String(creatorResult.reason?.message || creatorResult.reason || "线上达人等级映射读取失败");
+        state.sourceInfo.creator = state.raw.creatorRows.length ? `本地上传 ${formatInt(state.raw.creatorRows.length)} 条` : "线上不可用";
+      }
+
+      state.remote.lastLoadedAt = new Date().toLocaleString("zh-CN", { hour12: false });
+      if (!silent) {
+        renderHealth();
+      }
+      updateProcessState();
     }
 
     function setStatus(node, type, text) {
@@ -1250,12 +1376,25 @@
 
     function buildDimensionMaps() {
       const lifecycleMap = new Map();
-      state.raw.lifecycleRows.forEach((row) => {
+      const lifecycleRows = state.remote.lifecycleRows.length ? state.remote.lifecycleRows : state.raw.lifecycleRows;
+      const creatorRows = state.remote.creatorRows.length ? state.remote.creatorRows : state.raw.creatorRows;
+      state.sourceInfo.lifecycle = state.remote.lifecycleRows.length
+        ? `线上映射 ${formatInt(state.remote.lifecycleRows.length)} 条`
+        : state.raw.lifecycleRows.length
+          ? `本地上传 ${formatInt(state.raw.lifecycleRows.length)} 条`
+          : "未提供";
+      state.sourceInfo.creator = state.remote.creatorRows.length
+        ? `线上映射 ${formatInt(state.remote.creatorRows.length)} 条`
+        : state.raw.creatorRows.length
+          ? `本地上传 ${formatInt(state.raw.creatorRows.length)} 条`
+          : "未提供";
+
+      lifecycleRows.forEach((row) => {
         lifecycleMap.set(row.pid, row);
       });
 
       const creatorMap = new Map();
-      state.raw.creatorRows.forEach((row) => {
+      creatorRows.forEach((row) => {
         const creatorKey = normalizeText(row.creator_name);
         creatorMap.set(`${row.brand}__${creatorKey}`, row.creator_level);
       });
@@ -1896,11 +2035,37 @@
     }
 
     function renderHealth() {
+      const lifecycleRemoteStatus = state.remote.status.lifecycle === "ready"
+        ? `线上 ${formatInt(state.remote.lifecycleRows.length)} 条`
+        : state.remote.status.lifecycle === "empty"
+          ? "线上为空"
+          : state.remote.status.lifecycle === "error"
+            ? "线上失败"
+            : "未连接";
+      const creatorRemoteStatus = state.remote.status.creator === "ready"
+        ? `线上 ${formatInt(state.remote.creatorRows.length)} 条`
+        : state.remote.status.creator === "empty"
+          ? "线上为空"
+          : state.remote.status.creator === "error"
+            ? "线上失败"
+            : "未连接";
       const healthItems = [
         { title: "交易归因表", value: `${formatInt(state.raw.transactionRows.length)} 行`, note: `${formatInt(state.files.transaction.length)} 个文件，支持多品牌拼接。` },
         { title: "播放表现表", value: `${formatInt(state.raw.performanceRows.length)} 行`, note: `${formatInt(state.files.performance.length)} 个文件，用于播放内容分析。` },
-        { title: "产品生命周期表", value: `${formatInt(state.raw.lifecycleRows.length)} 行`, note: `${formatInt(state.files.lifecycle.length)} 个文件，通过 PID 补产品阶段。` },
-        { title: "达人等级表", value: `${formatInt(state.raw.creatorRows.length)} 行`, note: `${formatInt(state.files.creator.length)} 个文件，通过达人名补等级。` }
+        {
+          title: "产品生命周期映射",
+          value: state.sourceInfo.lifecycle,
+          note: state.remote.status.lifecycle === "error"
+            ? `线上映射不可用，当前可改用本地上传。${state.remote.errors.lifecycle}`
+            : `线上状态：${lifecycleRemoteStatus}。本地已缓存 ${formatInt(state.files.lifecycle.length)} 个文件，线上优先，本地兜底。`
+        },
+        {
+          title: "达人等级映射",
+          value: state.sourceInfo.creator,
+          note: state.remote.status.creator === "error"
+            ? `线上映射不可用，当前可改用本地上传。${state.remote.errors.creator}`
+            : `线上状态：${creatorRemoteStatus}。本地已缓存 ${formatInt(state.files.creator.length)} 个文件，线上优先，本地兜底。`
+        }
       ];
       const noticeItems = state.notices.map((text) => ({
         title: "上传提醒",
@@ -2597,6 +2762,7 @@
       refs.processBtn.textContent = "处理中...";
       try {
         state.notices = [];
+        await refreshRemoteMappings({ silent: true });
         await loadTransactionFiles();
         await loadPerformanceFiles();
         await loadLifecycleFiles();
@@ -2620,7 +2786,9 @@
     }
 
     function updateProcessState() {
-      const ready = state.files.transaction.length && state.files.performance.length && state.files.lifecycle.length && state.files.creator.length;
+      const lifecycleReady = Boolean(state.remote.lifecycleRows.length || state.files.lifecycle.length);
+      const creatorReady = Boolean(state.remote.creatorRows.length || state.files.creator.length);
+      const ready = state.files.transaction.length && state.files.performance.length && lifecycleReady && creatorReady;
       refs.processBtn.disabled = !ready;
     }
 
@@ -2716,6 +2884,16 @@
           applyFilters();
         }
       });
+    });
+
+    renderHealth();
+    refreshRemoteMappings({ silent: false }).catch((error) => {
+      state.remote.status.lifecycle = "error";
+      state.remote.status.creator = "error";
+      state.remote.errors.lifecycle = String(error.message || error || "线上映射读取失败");
+      state.remote.errors.creator = String(error.message || error || "线上映射读取失败");
+      renderHealth();
+      updateProcessState();
     });
   </script>
 </body>

@@ -1,0 +1,985 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>在线映射维护页</title>
+  <script src="https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js"></script>
+  <style>
+    :root {
+      --bg: #f6efe7;
+      --panel: rgba(255, 251, 245, 0.96);
+      --line: rgba(91, 68, 46, 0.12);
+      --ink: #2d241d;
+      --muted: #6f6255;
+      --accent: #cc6429;
+      --accent-soft: rgba(204, 100, 41, 0.12);
+      --green: #56744f;
+      --green-soft: rgba(86, 116, 79, 0.12);
+      --gold: #a97724;
+      --gold-soft: rgba(169, 119, 36, 0.12);
+      --radius: 22px;
+      --shadow: 0 18px 44px rgba(72, 55, 39, 0.1);
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      font-family: "Avenir Next", "PingFang SC", "Microsoft YaHei", sans-serif;
+      color: var(--ink);
+      background:
+        radial-gradient(circle at top left, rgba(204, 100, 41, 0.1), transparent 24%),
+        radial-gradient(circle at top right, rgba(86, 116, 79, 0.08), transparent 24%),
+        linear-gradient(180deg, #fcf9f4 0%, var(--bg) 100%);
+    }
+
+    .shell {
+      width: min(1360px, calc(100% - 24px));
+      margin: 16px auto 36px;
+    }
+
+    .panel {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      box-shadow: var(--shadow);
+      padding: 22px;
+    }
+
+    .hero-top,
+    .panel-header,
+    .section-actions,
+    .footer {
+      display: flex;
+      gap: 12px;
+      justify-content: space-between;
+      align-items: center;
+      flex-wrap: wrap;
+    }
+
+    .eyebrow,
+    .pill,
+    .status {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 8px 12px;
+      border-radius: 999px;
+      font-size: 12px;
+      font-weight: 800;
+    }
+
+    .eyebrow,
+    .pill {
+      background: var(--accent-soft);
+      color: var(--accent);
+    }
+
+    .pill.green,
+    .status.ready {
+      background: var(--green-soft);
+      color: var(--green);
+    }
+
+    .pill.warn,
+    .status.warn {
+      background: var(--gold-soft);
+      color: var(--gold);
+    }
+
+    .status.wait {
+      background: rgba(255, 255, 255, 0.8);
+      color: var(--muted);
+      border: 1px solid var(--line);
+    }
+
+    .dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: currentColor;
+    }
+
+    h1, h2, h3, p {
+      margin: 0;
+    }
+
+    h1 {
+      margin-top: 10px;
+      font-size: clamp(30px, 4vw, 42px);
+      letter-spacing: -0.04em;
+    }
+
+    p,
+    .mini {
+      color: var(--muted);
+      line-height: 1.65;
+      font-size: 13px;
+    }
+
+    .hero-actions,
+    .button-row,
+    .stats-grid,
+    .upload-grid {
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+      align-items: center;
+    }
+
+    .upload-grid,
+    .stats-grid {
+      display: grid;
+      gap: 16px;
+      margin-top: 16px;
+    }
+
+    .upload-grid {
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+    }
+
+    .stats-grid {
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+    }
+
+    button,
+    .button-like {
+      appearance: none;
+      border: 0;
+      border-radius: 14px;
+      padding: 12px 16px;
+      font-weight: 800;
+      cursor: pointer;
+      background: var(--accent);
+      color: white;
+      text-decoration: none;
+    }
+
+    button.secondary,
+    .button-like.secondary {
+      background: rgba(255, 255, 255, 0.86);
+      color: var(--ink);
+      border: 1px solid var(--line);
+    }
+
+    button:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+
+    .card,
+    .upload-card,
+    .list-item {
+      background: white;
+      border: 1px solid var(--line);
+      border-radius: 18px;
+    }
+
+    .upload-card,
+    .card,
+    .list-item {
+      padding: 18px;
+    }
+
+    .upload-card {
+      display: grid;
+      gap: 10px;
+    }
+
+    .upload-card input {
+      width: 100%;
+      padding: 10px 12px;
+      border-radius: 12px;
+      border: 1px dashed rgba(91, 68, 46, 0.18);
+      background: #fffdfa;
+    }
+
+    .section {
+      margin-top: 16px;
+      display: grid;
+      gap: 16px;
+    }
+
+    .list {
+      display: grid;
+      gap: 10px;
+    }
+
+    .list-item {
+      display: grid;
+      gap: 6px;
+    }
+
+    .stat-card small {
+      display: block;
+      margin-bottom: 12px;
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    .stat-card .value {
+      font-size: 28px;
+      font-weight: 800;
+      letter-spacing: -0.04em;
+      margin-bottom: 6px;
+    }
+
+    .issues {
+      max-height: 260px;
+      overflow: auto;
+      border: 1px solid var(--line);
+      border-radius: 16px;
+      background: rgba(255, 255, 255, 0.8);
+      padding: 14px;
+    }
+
+    .issues ul {
+      margin: 0;
+      padding-left: 18px;
+      color: var(--muted);
+      line-height: 1.6;
+      font-size: 13px;
+    }
+
+    .two-col {
+      display: grid;
+      gap: 16px;
+      grid-template-columns: 1fr 1fr;
+    }
+
+    @media (max-width: 980px) {
+      .upload-grid,
+      .stats-grid,
+      .two-col {
+        grid-template-columns: 1fr;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="shell">
+    <section class="panel">
+      <div class="hero-top">
+        <div>
+          <div class="eyebrow">Online Mapping Admin / v1</div>
+          <h1>生命周期与达人等级在线映射维护</h1>
+          <p>本页用于把生命周期表、`product_list` 和达人等级表更新到线上共享映射库。主看板会优先读取这里维护的结果；若线上暂时不可用，再回退到本地维表。</p>
+        </div>
+        <div class="hero-actions">
+          <a class="button-like secondary" href="./index.html" target="_blank" rel="noreferrer">打开主看板</a>
+          <button id="refreshRemoteBtn" class="secondary">刷新线上快照</button>
+        </div>
+      </div>
+
+      <div class="stats-grid" id="remoteStats"></div>
+    </section>
+
+    <section class="section">
+      <div class="panel">
+        <div class="panel-header">
+          <div>
+            <div class="pill">生命周期映射</div>
+            <h2 style="margin-top:8px;">上传生命周期表并更新线上库</h2>
+            <p>支持先读生命周期表中的 `PID / product period / product name / 产品名`，再用可选的 `product_list` 按 `ID -> Product` 自动补全 `product name`。</p>
+          </div>
+          <div class="section-actions">
+            <button id="previewLifecycleBtn" class="secondary">预览本次更新</button>
+            <button id="syncLifecycleBtn" disabled>更新生命周期映射</button>
+          </div>
+        </div>
+
+        <div class="upload-grid">
+          <div class="upload-card">
+            <strong>1. 生命周期表</strong>
+            <div class="mini">至少上传 1 个文件，必需字段：`PID`。</div>
+            <input id="lifecycleFiles" type="file" accept=".xlsx,.xls" multiple>
+            <div class="status wait" id="lifecycleStatus"><span class="dot"></span>等待上传</div>
+          </div>
+          <div class="upload-card">
+            <strong>2. product_list（可选）</strong>
+            <div class="mini">若生命周期表里的 `product name` 缺失，可额外上传 1 个或多个 `product_list` 自动补齐。</div>
+            <input id="productListFiles" type="file" accept=".xlsx,.xls" multiple>
+            <div class="status wait" id="productListStatus"><span class="dot"></span>可选上传</div>
+          </div>
+          <div class="upload-card">
+            <strong>当前写入规则</strong>
+            <div class="mini">按 `workspace_id + pid` upsert。新文件里的 PID 会插入或覆盖；旧库里未出现在本次文件里的 PID 保留不删。</div>
+            <div class="status ready" id="lifecycleRuleStatus"><span class="dot"></span>仅覆盖同主键</div>
+          </div>
+        </div>
+
+        <div class="stats-grid" id="lifecycleStats"></div>
+        <div class="two-col">
+          <div class="issues"><ul id="lifecycleIssues"><li>等待预览。</li></ul></div>
+          <div class="issues"><ul id="lifecycleResult"><li>尚未执行写入。</li></ul></div>
+        </div>
+      </div>
+
+      <div class="panel">
+        <div class="panel-header">
+          <div>
+            <div class="pill">达人等级映射</div>
+            <h2 style="margin-top:8px;">上传达人等级表并更新线上库</h2>
+            <p>按 `brand + creator name` 唯一定位达人等级。品牌会统一标准化为 `SPARCO / LETME / ICYEE / STYPRO`；若无法识别品牌，该行会被列入问题清单，不写入线上库。</p>
+          </div>
+          <div class="section-actions">
+            <button id="previewCreatorBtn" class="secondary">预览本次更新</button>
+            <button id="syncCreatorBtn" disabled>更新达人等级映射</button>
+          </div>
+        </div>
+
+        <div class="upload-grid">
+          <div class="upload-card">
+            <strong>1. 达人等级表</strong>
+            <div class="mini">必需字段：`creator name / sparco`、`creator level / level`。品牌可来自表内字段，也可从文件名识别。</div>
+            <input id="creatorFiles" type="file" accept=".xlsx,.xls" multiple>
+            <div class="status wait" id="creatorStatus"><span class="dot"></span>等待上传</div>
+          </div>
+          <div class="upload-card">
+            <strong>当前写入规则</strong>
+            <div class="mini">按 `workspace_id + brand + creator_name` upsert。相同品牌下同名达人会覆盖更新，跨品牌不会串层级。</div>
+            <div class="status ready" id="creatorRuleStatus"><span class="dot"></span>品牌 + 达人名</div>
+          </div>
+          <div class="upload-card">
+            <strong>写入方式</strong>
+            <div class="mini">当前版本按你的要求采用公开可写模式，不做登录。后续如果要收紧权限，可直接把 RPC 切回口令校验。</div>
+            <div class="status warn" id="writeModeStatus"><span class="dot"></span>公开可写</div>
+          </div>
+        </div>
+
+        <div class="stats-grid" id="creatorStats"></div>
+        <div class="two-col">
+          <div class="issues"><ul id="creatorIssues"><li>等待预览。</li></ul></div>
+          <div class="issues"><ul id="creatorResult"><li>尚未执行写入。</li></ul></div>
+        </div>
+      </div>
+    </section>
+  </div>
+
+  <script>
+    const BRAND_RULES = [
+      { code: "SPARCO", tokens: ["spar.co", "sparco", "spar co"] },
+      { code: "LETME", tokens: ["let me", "letme"] },
+      { code: "ICYEE", tokens: ["icyee", "ic yee"] },
+      { code: "STYPRO", tokens: ["stypro"] }
+    ];
+    const PUBLIC_READ_SYNC_SETTINGS = {
+      supabaseUrl: "https://sbznfjnsirajqkkcwayj.supabase.co",
+      anonKey: "sb_publishable_tM67K7Mi1qDUkemhgzDuGg_dsdwitBT",
+      workspaceId: "creator-dashboard-prod",
+      editorName: "public-web"
+    };
+
+    const state = {
+      files: {
+        lifecycle: [],
+        productList: [],
+        creator: []
+      },
+      remote: {
+        lifecycleRows: [],
+        creatorRows: [],
+        lastLoadedAt: ""
+      },
+      previews: {
+        lifecycle: null,
+        creator: null
+      }
+    };
+
+    const refs = {
+      remoteStats: document.getElementById("remoteStats"),
+      refreshRemoteBtn: document.getElementById("refreshRemoteBtn"),
+      lifecycleFiles: document.getElementById("lifecycleFiles"),
+      productListFiles: document.getElementById("productListFiles"),
+      creatorFiles: document.getElementById("creatorFiles"),
+      lifecycleStatus: document.getElementById("lifecycleStatus"),
+      productListStatus: document.getElementById("productListStatus"),
+      creatorStatus: document.getElementById("creatorStatus"),
+      previewLifecycleBtn: document.getElementById("previewLifecycleBtn"),
+      syncLifecycleBtn: document.getElementById("syncLifecycleBtn"),
+      previewCreatorBtn: document.getElementById("previewCreatorBtn"),
+      syncCreatorBtn: document.getElementById("syncCreatorBtn"),
+      lifecycleStats: document.getElementById("lifecycleStats"),
+      creatorStats: document.getElementById("creatorStats"),
+      lifecycleIssues: document.getElementById("lifecycleIssues"),
+      lifecycleResult: document.getElementById("lifecycleResult"),
+      creatorIssues: document.getElementById("creatorIssues"),
+      creatorResult: document.getElementById("creatorResult")
+    };
+
+    const formatInt = (value) => new Intl.NumberFormat("zh-CN").format(Number(value || 0));
+
+    function normalizeText(value) {
+      return String(value ?? "")
+        .trim()
+        .toLowerCase()
+        .replace(/\n/g, " ")
+        .replace(/\s+/g, " ");
+    }
+
+    function normalizeHeader(value) {
+      return normalizeText(value).replace(/[_-]+/g, " ");
+    }
+
+    function detectBrand(name) {
+      const lower = normalizeText(name);
+      const rule = BRAND_RULES.find((item) => item.tokens.some((token) => lower.includes(token)));
+      return rule ? rule.code : "UNKNOWN";
+    }
+
+    function resolveBrand(...values) {
+      for (const value of values) {
+        const hit = detectBrand(value);
+        if (hit !== "UNKNOWN") return hit;
+      }
+      return "UNKNOWN";
+    }
+
+    function setStatus(node, type, text) {
+      node.className = `status ${type}`;
+      node.innerHTML = `<span class="dot"></span>${text}`;
+    }
+
+    function escapeHtml(value) {
+      return String(value ?? "")
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/\"/g, "&quot;")
+        .replace(/'/g, "&#39;");
+    }
+
+    function buildSupabaseHeaders(extra = {}) {
+      return {
+        apikey: PUBLIC_READ_SYNC_SETTINGS.anonKey,
+        Authorization: `Bearer ${PUBLIC_READ_SYNC_SETTINGS.anonKey}`,
+        ...extra
+      };
+    }
+
+    async function supabaseRequest(path, options = {}) {
+      const { headers = {}, ...rest } = options;
+      const response = await fetch(`${PUBLIC_READ_SYNC_SETTINGS.supabaseUrl}/rest/v1${path}`, {
+        ...rest,
+        headers: buildSupabaseHeaders(headers)
+      });
+      if (!response.ok) {
+        const text = await response.text();
+        throw new Error(text || `Supabase ${response.status}`);
+      }
+      if (response.status === 204) return null;
+      return response.json();
+    }
+
+    async function fetchAllSupabaseRows(table, select) {
+      const workspace = encodeURIComponent(PUBLIC_READ_SYNC_SETTINGS.workspaceId);
+      const rows = [];
+      const limit = 1000;
+      let offset = 0;
+      while (true) {
+        const batch = await supabaseRequest(
+          `/${table}?workspace_id=eq.${workspace}&select=${encodeURIComponent(select)}&limit=${limit}&offset=${offset}`
+        );
+        if (!Array.isArray(batch) || !batch.length) break;
+        rows.push(...batch);
+        if (batch.length < limit) break;
+        offset += limit;
+      }
+      return rows;
+    }
+
+    async function materializeFiles(fileList) {
+      const items = [];
+      const failures = [];
+      for (const file of [...fileList]) {
+        try {
+          items.push({
+            name: file.name,
+            size: file.size,
+            lastModified: file.lastModified,
+            buffer: await file.arrayBuffer()
+          });
+        } catch (error) {
+          failures.push({ name: file.name, error });
+        }
+      }
+      return { items, failures };
+    }
+
+    function readWorkbookArrays(file) {
+      try {
+        const workbook = XLSX.read(file.buffer, { type: "array" });
+        const sheet = workbook.Sheets[workbook.SheetNames[0]];
+        return XLSX.utils.sheet_to_json(sheet, { header: 1, defval: "" });
+      } catch (error) {
+        throw new Error(`文件「${file.name}」读取失败，请重新选择。`);
+      }
+    }
+
+    function findHeaderRow(matrix, requiredHeaders) {
+      const normalizedRequired = requiredHeaders.map(normalizeHeader);
+      for (let i = 0; i < Math.min(matrix.length, 12); i += 1) {
+        const row = matrix[i].map(normalizeHeader);
+        if (normalizedRequired.every((header) => row.includes(header))) return i;
+      }
+      return -1;
+    }
+
+    function rowsFromMatrix(matrix, headerRowIndex) {
+      const headers = matrix[headerRowIndex] || [];
+      const rows = [];
+      for (let i = headerRowIndex + 1; i < matrix.length; i += 1) {
+        const source = matrix[i];
+        if (!source || !source.some((cell) => String(cell || "").trim())) continue;
+        const row = {};
+        headers.forEach((header, index) => {
+          if (String(header || "").trim()) row[header] = source[index] ?? "";
+        });
+        if (Object.keys(row).length) rows.push(row);
+      }
+      return rows;
+    }
+
+    function extractRowsWithDetectedHeader(matrix, requiredHeaders) {
+      const headerRowIndex = findHeaderRow(matrix, requiredHeaders);
+      if (headerRowIndex < 0) return [];
+      return rowsFromMatrix(matrix, headerRowIndex);
+    }
+
+    function findKey(sample, acceptedHeaders) {
+      const mapping = new Map();
+      Object.keys(sample || {}).forEach((key) => mapping.set(normalizeHeader(key), key));
+      for (const header of acceptedHeaders) {
+        const hit = mapping.get(normalizeHeader(header));
+        if (hit) return hit;
+      }
+      return "";
+    }
+
+    function renderRemoteStats() {
+      const cards = [
+        {
+          label: "线上生命周期映射",
+          value: `${formatInt(state.remote.lifecycleRows.length)} 条`,
+          note: state.remote.lastLoadedAt ? `最近刷新：${state.remote.lastLoadedAt}` : "尚未刷新线上快照"
+        },
+        {
+          label: "线上达人等级映射",
+          value: `${formatInt(state.remote.creatorRows.length)} 条`,
+          note: "主看板会优先使用线上映射。"
+        },
+        {
+          label: "Workspace",
+          value: PUBLIC_READ_SYNC_SETTINGS.workspaceId,
+          note: "当前维护页和主看板读取同一个共享工作区。"
+        },
+        {
+          label: "写入模式",
+          value: "公开可写",
+          note: "本版不做登录，后续可切回口令校验。"
+        }
+      ];
+      refs.remoteStats.innerHTML = cards.map((card) => `
+        <div class="card stat-card">
+          <small>${card.label}</small>
+          <div class="value">${escapeHtml(card.value)}</div>
+          <div class="mini">${escapeHtml(card.note)}</div>
+        </div>
+      `).join("");
+    }
+
+    function renderPreviewStats(target, cards) {
+      target.innerHTML = cards.map((card) => `
+        <div class="card stat-card">
+          <small>${card.label}</small>
+          <div class="value">${escapeHtml(String(card.value))}</div>
+          <div class="mini">${escapeHtml(card.note)}</div>
+        </div>
+      `).join("");
+    }
+
+    function renderIssuesList(target, items, emptyText) {
+      target.innerHTML = items.length
+        ? items.map((item) => `<li>${escapeHtml(item)}</li>`).join("")
+        : `<li>${escapeHtml(emptyText)}</li>`;
+    }
+
+    async function refreshRemoteSnapshot() {
+      refs.refreshRemoteBtn.disabled = true;
+      try {
+        const [lifecycleRows, creatorRows] = await Promise.all([
+          fetchAllSupabaseRows("product_lifecycle_map", "pid,brand,product_period,product_name,product_name_cn,updated_at"),
+          fetchAllSupabaseRows("creator_level_map", "brand,creator_name,creator_level,updated_at")
+        ]);
+        state.remote.lifecycleRows = (lifecycleRows || []).map((row) => ({
+          pid: String(row.pid || "").trim(),
+          brand: resolveBrand(row.brand, row.product_name, row.product_name_cn),
+          product_period: String(row.product_period || "").trim(),
+          product_name: String(row.product_name || "").trim(),
+          product_name_cn: String(row.product_name_cn || "").trim()
+        })).filter((row) => row.pid);
+        state.remote.creatorRows = (creatorRows || []).map((row) => ({
+          brand: resolveBrand(row.brand),
+          creator_name: String(row.creator_name || "").trim(),
+          creator_level: String(row.creator_level || "L3").trim() || "L3"
+        })).filter((row) => row.creator_name && row.brand !== "UNKNOWN");
+        state.remote.lastLoadedAt = new Date().toLocaleString("zh-CN", { hour12: false });
+        renderRemoteStats();
+      } finally {
+        refs.refreshRemoteBtn.disabled = false;
+      }
+    }
+
+    function bindFileInput(input, key, statusNode, label, emptyText = "等待上传") {
+      input.addEventListener("change", async () => {
+        const selectedFiles = input.files;
+        if (!selectedFiles?.length) {
+          state.files[key] = [];
+          setStatus(statusNode, "wait", emptyText);
+          return;
+        }
+
+        input.disabled = true;
+        setStatus(statusNode, "wait", `正在缓存 ${label}...`);
+        try {
+          const { items, failures } = await materializeFiles(selectedFiles);
+          state.files[key] = items;
+          if (failures.length) {
+            const names = failures.map((item) => `「${item.name}」`).join("、");
+            state.files[key] = items;
+            setStatus(statusNode, items.length ? "warn" : "wait", `${label} 读取异常`);
+            throw new Error(`${label} 中有文件读取失败：${names}。请重新选择这些文件。`);
+          }
+          setStatus(statusNode, items.length ? "ready" : "wait", `${label} 已缓存 ${items.length} 个文件`);
+        } catch (error) {
+          state.files[key] = [];
+          setStatus(statusNode, "warn", `${label} 读取失败，请重选`);
+          alert(error.message);
+        } finally {
+          input.value = "";
+          input.disabled = false;
+        }
+      });
+    }
+
+    function parseProductListFiles(files) {
+      const productMap = new Map();
+      const issues = [];
+      let validRows = 0;
+      files.forEach((file) => {
+        const matrix = readWorkbookArrays(file);
+        const rows = extractRowsWithDetectedHeader(matrix, ["ID", "Product"]);
+        if (!rows.length) {
+          issues.push(`product_list 文件「${file.name}」未识别到有效表头，期望字段包含：ID、Product`);
+          return;
+        }
+        const sample = rows[0] || {};
+        const idKey = findKey(sample, ["ID"]);
+        const productKey = findKey(sample, ["Product"]);
+        rows.forEach((row) => {
+          const id = String(row[idKey] || "").trim();
+          const product = String(row[productKey] || "").trim();
+          if (!/^\d{10,}$/.test(id) || !product) return;
+          productMap.set(id, product);
+          validRows += 1;
+        });
+      });
+      return { productMap, validRows, issues };
+    }
+
+    function buildLifecyclePreview() {
+      if (!state.files.lifecycle.length) {
+        throw new Error("请先上传至少 1 个生命周期表。");
+      }
+
+      const issues = [];
+      let rawCount = 0;
+      let invalidPidCount = 0;
+      const deduped = new Map();
+
+      state.files.lifecycle.forEach((file) => {
+        const matrix = readWorkbookArrays(file);
+        const rows = extractRowsWithDetectedHeader(matrix, ["PID"]);
+        if (!rows.length) {
+          issues.push(`生命周期文件「${file.name}」未识别到有效表头，期望字段包含：PID`);
+          return;
+        }
+        const sample = rows[0] || {};
+        const pidKey = findKey(sample, ["PID", "Product ID"]);
+        const periodKey = findKey(sample, ["product period", "产品阶段", "period"]);
+        const productNameKey = findKey(sample, ["product name", "product name_raw", "product name raw"]);
+        const productNameCnKey = findKey(sample, ["产品名", "product name_cn", "product name cn"]);
+
+        rows.forEach((row) => {
+          rawCount += 1;
+          const pid = String(row[pidKey] || "").trim();
+          if (!/^\d{10,}$/.test(pid)) {
+            invalidPidCount += 1;
+            return;
+          }
+          deduped.set(pid, {
+            pid,
+            brand: resolveBrand(row[productNameKey], row[productNameCnKey], file.name),
+            product_period: String(row[periodKey] || "").trim(),
+            product_name: String(row[productNameKey] || "").trim(),
+            product_name_cn: String(row[productNameCnKey] || "").trim(),
+            source_file: file.name
+          });
+        });
+      });
+
+      const productListMeta = parseProductListFiles(state.files.productList);
+      productListMeta.issues.forEach((item) => issues.push(item));
+
+      const remoteKeys = new Set(state.remote.lifecycleRows.map((row) => row.pid));
+      const rows = [...deduped.values()].map((row) => ({
+        ...row,
+        product_name: productListMeta.productMap.get(row.pid) || row.product_name || ""
+      }));
+      const insertedCount = rows.filter((row) => !remoteKeys.has(row.pid)).length;
+      const updatedCount = rows.length - insertedCount;
+      const missingProductNameCount = rows.filter((row) => !row.product_name).length;
+
+      if (missingProductNameCount) {
+        rows.filter((row) => !row.product_name).slice(0, 12).forEach((row) => {
+          issues.push(`PID ${row.pid} 仍未补齐 product name`);
+        });
+      }
+
+      return {
+        rows,
+        sourceFile: state.files.lifecycle.map((file) => file.name).join(", "),
+        stats: {
+          rawCount,
+          validCount: rows.length,
+          insertedCount,
+          updatedCount,
+          missingProductNameCount,
+          skippedCount: Math.max(rawCount - rows.length, 0),
+          productListRows: productListMeta.validRows
+        },
+        issues
+      };
+    }
+
+    function buildCreatorPreview() {
+      if (!state.files.creator.length) {
+        throw new Error("请先上传至少 1 个达人等级表。");
+      }
+
+      const issues = [];
+      let rawCount = 0;
+      let invalidBrandCount = 0;
+      let invalidCreatorCount = 0;
+      const deduped = new Map();
+
+      state.files.creator.forEach((file) => {
+        const matrix = readWorkbookArrays(file);
+        let rows = extractRowsWithDetectedHeader(matrix, ["level", "sparco"]);
+        if (!rows.length) {
+          rows = extractRowsWithDetectedHeader(matrix, ["creator name", "creator level"]);
+        }
+        if (!rows.length) {
+          issues.push(`达人等级文件「${file.name}」未识别到有效表头，期望字段包含：creator name / sparco、creator level / level`);
+          return;
+        }
+        const sample = rows[0] || {};
+        const creatorKey = findKey(sample, ["creator name", "sparco"]);
+        const levelKey = findKey(sample, ["creator level", "level", "达人等级"]);
+        const brandKey = findKey(sample, ["brand", "品牌"]);
+
+        rows.forEach((row) => {
+          rawCount += 1;
+          const creatorName = String(row[creatorKey] || "").trim();
+          const creatorLevel = String(row[levelKey] || "").trim();
+          if (!creatorName || !creatorLevel) {
+            invalidCreatorCount += 1;
+            return;
+          }
+          const brand = resolveBrand(row[brandKey], file.name);
+          if (brand === "UNKNOWN") {
+            invalidBrandCount += 1;
+            issues.push(`达人「${creatorName}」在文件「${file.name}」里无法识别品牌，已跳过`);
+            return;
+          }
+          deduped.set(`${brand}__${normalizeText(creatorName)}`, {
+            brand,
+            creator_name: creatorName,
+            creator_level: creatorLevel || "L3",
+            source_file: file.name
+          });
+        });
+      });
+
+      const remoteKeys = new Set(state.remote.creatorRows.map((row) => `${row.brand}__${normalizeText(row.creator_name)}`));
+      const rows = [...deduped.values()];
+      const insertedCount = rows.filter((row) => !remoteKeys.has(`${row.brand}__${normalizeText(row.creator_name)}`)).length;
+      const updatedCount = rows.length - insertedCount;
+
+      return {
+        rows,
+        sourceFile: state.files.creator.map((file) => file.name).join(", "),
+        stats: {
+          rawCount,
+          validCount: rows.length,
+          insertedCount,
+          updatedCount,
+          invalidBrandCount,
+          invalidCreatorCount,
+          skippedCount: Math.max(rawCount - rows.length, 0)
+        },
+        issues
+      };
+    }
+
+    function renderLifecyclePreview(preview) {
+      renderPreviewStats(refs.lifecycleStats, [
+        { label: "识别记录", value: formatInt(preview.stats.rawCount), note: "生命周期表原始识别行数。" },
+        { label: "有效 PID", value: formatInt(preview.stats.validCount), note: "去重后的有效 PID 数量。" },
+        { label: "新增 / 覆盖", value: `${formatInt(preview.stats.insertedCount)} / ${formatInt(preview.stats.updatedCount)}`, note: "按线上已有 PID 判断本次新增与覆盖数量。" },
+        { label: "未补齐 product name", value: formatInt(preview.stats.missingProductNameCount), note: `product_list 命中 ${formatInt(preview.stats.productListRows)} 行。` }
+      ]);
+      renderIssuesList(refs.lifecycleIssues, preview.issues, "本次预览没有发现问题。");
+      renderIssuesList(refs.lifecycleResult, [
+        `本次会写入 ${formatInt(preview.stats.validCount)} 条生命周期映射。`,
+        `其中新增 ${formatInt(preview.stats.insertedCount)} 条，覆盖 ${formatInt(preview.stats.updatedCount)} 条。`,
+        `未进入写入的行数：${formatInt(preview.stats.skippedCount)}。`
+      ], "等待写入。");
+      refs.syncLifecycleBtn.disabled = !preview.rows.length;
+    }
+
+    function renderCreatorPreview(preview) {
+      renderPreviewStats(refs.creatorStats, [
+        { label: "识别记录", value: formatInt(preview.stats.rawCount), note: "达人等级表原始识别行数。" },
+        { label: "有效映射", value: formatInt(preview.stats.validCount), note: "按品牌 + 达人名去重后的有效映射条数。" },
+        { label: "新增 / 覆盖", value: `${formatInt(preview.stats.insertedCount)} / ${formatInt(preview.stats.updatedCount)}`, note: "按线上已有品牌 + 达人名判断本次新增与覆盖数量。" },
+        { label: "无法识别品牌", value: formatInt(preview.stats.invalidBrandCount), note: `缺少达人名或等级的行数：${formatInt(preview.stats.invalidCreatorCount)}。` }
+      ]);
+      renderIssuesList(refs.creatorIssues, preview.issues, "本次预览没有发现问题。");
+      renderIssuesList(refs.creatorResult, [
+        `本次会写入 ${formatInt(preview.stats.validCount)} 条达人等级映射。`,
+        `其中新增 ${formatInt(preview.stats.insertedCount)} 条，覆盖 ${formatInt(preview.stats.updatedCount)} 条。`,
+        `未进入写入的行数：${formatInt(preview.stats.skippedCount)}。`
+      ], "等待写入。");
+      refs.syncCreatorBtn.disabled = !preview.rows.length;
+    }
+
+    async function syncLifecyclePreview() {
+      refs.syncLifecycleBtn.disabled = true;
+      refs.syncLifecycleBtn.textContent = "写入中...";
+      try {
+        const preview = state.previews.lifecycle || buildLifecyclePreview();
+        state.previews.lifecycle = preview;
+        const result = await supabaseRequest("/rpc/upsert_product_lifecycle_map_batch", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            p_workspace_id: PUBLIC_READ_SYNC_SETTINGS.workspaceId,
+            p_passcode: null,
+            p_editor_name: PUBLIC_READ_SYNC_SETTINGS.editorName,
+            p_source_file: preview.sourceFile,
+            p_rows: preview.rows
+          })
+        });
+        renderIssuesList(refs.lifecycleResult, [
+          `写入完成：共处理 ${formatInt(result.total_count)} 条。`,
+          `新增 ${formatInt(result.inserted_count)} 条，覆盖 ${formatInt(result.updated_count)} 条。`,
+          `跳过 ${formatInt(result.skipped_count)} 条。`
+        ], "写入完成。");
+        await refreshRemoteSnapshot();
+      } finally {
+        refs.syncLifecycleBtn.textContent = "更新生命周期映射";
+        refs.syncLifecycleBtn.disabled = !(state.previews.lifecycle && state.previews.lifecycle.rows.length);
+      }
+    }
+
+    async function syncCreatorPreview() {
+      refs.syncCreatorBtn.disabled = true;
+      refs.syncCreatorBtn.textContent = "写入中...";
+      try {
+        const preview = state.previews.creator || buildCreatorPreview();
+        state.previews.creator = preview;
+        const result = await supabaseRequest("/rpc/upsert_creator_level_map_batch", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            p_workspace_id: PUBLIC_READ_SYNC_SETTINGS.workspaceId,
+            p_passcode: null,
+            p_editor_name: PUBLIC_READ_SYNC_SETTINGS.editorName,
+            p_source_file: preview.sourceFile,
+            p_rows: preview.rows
+          })
+        });
+        renderIssuesList(refs.creatorResult, [
+          `写入完成：共处理 ${formatInt(result.total_count)} 条。`,
+          `新增 ${formatInt(result.inserted_count)} 条，覆盖 ${formatInt(result.updated_count)} 条。`,
+          `跳过 ${formatInt(result.skipped_count)} 条。`
+        ], "写入完成。");
+        await refreshRemoteSnapshot();
+      } finally {
+        refs.syncCreatorBtn.textContent = "更新达人等级映射";
+        refs.syncCreatorBtn.disabled = !(state.previews.creator && state.previews.creator.rows.length);
+      }
+    }
+
+    bindFileInput(refs.lifecycleFiles, "lifecycle", refs.lifecycleStatus, "生命周期表");
+    bindFileInput(refs.productListFiles, "productList", refs.productListStatus, "product_list", "可选上传");
+    bindFileInput(refs.creatorFiles, "creator", refs.creatorStatus, "达人等级表");
+
+    refs.refreshRemoteBtn.addEventListener("click", async () => {
+      try {
+        await refreshRemoteSnapshot();
+      } catch (error) {
+        alert(`刷新线上快照失败：${error.message}`);
+      }
+    });
+
+    refs.previewLifecycleBtn.addEventListener("click", () => {
+      try {
+        const preview = buildLifecyclePreview();
+        state.previews.lifecycle = preview;
+        renderLifecyclePreview(preview);
+      } catch (error) {
+        alert(error.message);
+      }
+    });
+
+    refs.previewCreatorBtn.addEventListener("click", () => {
+      try {
+        const preview = buildCreatorPreview();
+        state.previews.creator = preview;
+        renderCreatorPreview(preview);
+      } catch (error) {
+        alert(error.message);
+      }
+    });
+
+    refs.syncLifecycleBtn.addEventListener("click", () => {
+      syncLifecyclePreview().catch((error) => alert(`生命周期映射写入失败：${error.message}`));
+    });
+
+    refs.syncCreatorBtn.addEventListener("click", () => {
+      syncCreatorPreview().catch((error) => alert(`达人等级映射写入失败：${error.message}`));
+    });
+
+    renderRemoteStats();
+    renderPreviewStats(refs.lifecycleStats, [
+      { label: "识别记录", value: 0, note: "等待生命周期表预览。" },
+      { label: "有效 PID", value: 0, note: "等待生命周期表预览。" },
+      { label: "新增 / 覆盖", value: "0 / 0", note: "等待生命周期表预览。" },
+      { label: "未补齐 product name", value: 0, note: "等待生命周期表预览。" }
+    ]);
+    renderPreviewStats(refs.creatorStats, [
+      { label: "识别记录", value: 0, note: "等待达人等级表预览。" },
+      { label: "有效映射", value: 0, note: "等待达人等级表预览。" },
+      { label: "新增 / 覆盖", value: "0 / 0", note: "等待达人等级表预览。" },
+      { label: "无法识别品牌", value: 0, note: "等待达人等级表预览。" }
+    ]);
+    refreshRemoteSnapshot().catch((error) => {
+      alert(`读取线上映射失败：${error.message}。如果你还没执行 SQL 初始化，这里会先报错，等建表后再刷新即可。`);
+    });
+  </script>
+</body>
+</html>
