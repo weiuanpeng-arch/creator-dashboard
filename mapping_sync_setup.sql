@@ -1,3 +1,40 @@
+create extension if not exists pgcrypto;
+
+create table if not exists public.creator_sync_workspaces (
+  workspace_id text primary key,
+  workspace_name text not null,
+  write_passcode_hash text not null,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+create or replace function public.verify_creator_workspace_passcode(
+  p_workspace_id text,
+  p_passcode text
+)
+returns void
+language plpgsql
+security definer
+set search_path = public, extensions
+as $$
+declare
+  stored_hash text;
+begin
+  select write_passcode_hash
+  into stored_hash
+  from public.creator_sync_workspaces
+  where workspace_id = p_workspace_id;
+
+  if stored_hash is null then
+    raise exception 'Workspace not found: %', p_workspace_id;
+  end if;
+
+  if extensions.crypt(coalesce(p_passcode, ''), stored_hash) <> stored_hash then
+    raise exception 'Invalid write passcode';
+  end if;
+end;
+$$;
+
 create table if not exists public.product_lifecycle_map (
   workspace_id text not null references public.creator_sync_workspaces(workspace_id) on delete cascade,
   pid text not null,
@@ -58,6 +95,8 @@ declare
   v_inserted_count integer := 0;
   v_skipped_count integer := 0;
 begin
+  perform public.verify_creator_workspace_passcode(p_workspace_id, p_passcode);
+
   with source_rows as (
     select
       row_number() over () as seq,
@@ -168,6 +207,8 @@ declare
   v_inserted_count integer := 0;
   v_skipped_count integer := 0;
 begin
+  perform public.verify_creator_workspace_passcode(p_workspace_id, p_passcode);
+
   with source_rows as (
     select
       row_number() over () as seq,
@@ -256,5 +297,19 @@ grant execute on function public.upsert_creator_level_map_batch(text, text, text
 
 comment on table public.product_lifecycle_map is 'Shared lifecycle mapping by workspace and PID';
 comment on table public.creator_level_map is 'Shared creator level mapping by workspace, brand and creator name';
-comment on function public.upsert_product_lifecycle_map_batch(text, text, text, text, jsonb) is 'Public batch upsert for lifecycle mapping. p_passcode kept for future compatibility and intentionally unused in the current public-write mode.';
-comment on function public.upsert_creator_level_map_batch(text, text, text, text, jsonb) is 'Public batch upsert for creator level mapping. p_passcode kept for future compatibility and intentionally unused in the current public-write mode.';
+comment on function public.upsert_product_lifecycle_map_batch(text, text, text, text, jsonb) is 'Batch upsert for lifecycle mapping guarded by creator workspace passcode.';
+comment on function public.upsert_creator_level_map_batch(text, text, text, text, jsonb) is 'Batch upsert for creator level mapping guarded by creator workspace passcode.';
+
+-- 如果 creator-dashboard-prod 工作区还不存在，先执行一条类似下面的 SQL。
+-- 把 replace-with-your-passcode 替换成你团队约定的共享口令。
+-- insert into public.creator_sync_workspaces (workspace_id, workspace_name, write_passcode_hash)
+-- values (
+--   'creator-dashboard-prod',
+--   'Creator Dashboard Prod',
+--   extensions.crypt('replace-with-your-passcode', extensions.gen_salt('bf'))
+-- )
+-- on conflict (workspace_id)
+-- do update set
+--   workspace_name = excluded.workspace_name,
+--   write_passcode_hash = excluded.write_passcode_hash,
+--   updated_at = now();
