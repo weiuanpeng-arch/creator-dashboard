@@ -242,6 +242,33 @@
       font-size: 13px;
     }
 
+    .settings-grid {
+      display: grid;
+      gap: 16px;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      margin-top: 16px;
+    }
+
+    .field {
+      display: grid;
+      gap: 8px;
+    }
+
+    .field label {
+      font-size: 12px;
+      font-weight: 800;
+      color: var(--muted);
+    }
+
+    .field input {
+      width: 100%;
+      padding: 12px 14px;
+      border-radius: 12px;
+      border: 1px solid rgba(91, 68, 46, 0.16);
+      background: #fffdfa;
+      color: var(--ink);
+    }
+
     .two-col {
       display: grid;
       gap: 16px;
@@ -251,6 +278,7 @@
     @media (max-width: 980px) {
       .upload-grid,
       .stats-grid,
+      .settings-grid,
       .two-col {
         grid-template-columns: 1fr;
       }
@@ -273,6 +301,29 @@
       </div>
 
       <div class="stats-grid" id="remoteStats"></div>
+      <div class="settings-grid">
+        <div class="upload-card">
+          <div class="field">
+            <label for="workspaceIdInput">Workspace ID</label>
+            <input id="workspaceIdInput" type="text" readonly>
+          </div>
+          <div class="mini">当前维护页和主看板共享同一个工作区。</div>
+        </div>
+        <div class="upload-card">
+          <div class="field">
+            <label for="editorNameInput">编辑人</label>
+            <input id="editorNameInput" type="text" placeholder="例如：Wei / Ops Team">
+          </div>
+          <div class="mini">只有写入线上映射时才会校验，读线上快照不需要填写。</div>
+        </div>
+        <div class="upload-card">
+          <div class="field">
+            <label for="writePasscodeInput">写入口令</label>
+            <input id="writePasscodeInput" type="password" placeholder="输入团队共享口令">
+          </div>
+          <div class="mini">页面不会公开展示口令；刷新后会保留在当前浏览器。</div>
+        </div>
+      </div>
     </section>
 
     <section class="section">
@@ -343,8 +394,8 @@
           </div>
           <div class="upload-card">
             <strong>写入方式</strong>
-            <div class="mini">当前版本按你的要求采用公开可写模式，不做登录。后续如果要收紧权限，可直接把 RPC 切回口令校验。</div>
-            <div class="status warn" id="writeModeStatus"><span class="dot"></span>公开可写</div>
+            <div class="mini">当前版本改为共享口令写入：读保持公开，写入时要求编辑人 + 写入口令。</div>
+            <div class="status ready" id="writeModeStatus"><span class="dot"></span>共享口令写入</div>
           </div>
         </div>
 
@@ -368,8 +419,9 @@
       supabaseUrl: "https://sbznfjnsirajqkkcwayj.supabase.co",
       anonKey: "sb_publishable_tM67K7Mi1qDUkemhgzDuGg_dsdwitBT",
       workspaceId: "creator-dashboard-prod",
-      editorName: "public-web"
+      editorName: ""
     };
+    const ADMIN_SYNC_SETTINGS_KEY = "mapping_admin_sync_settings_v1";
 
     const state = {
       files: {
@@ -385,12 +437,20 @@
       previews: {
         lifecycle: null,
         creator: null
+      },
+      syncSettings: {
+        workspaceId: PUBLIC_READ_SYNC_SETTINGS.workspaceId,
+        editorName: "",
+        writePasscode: ""
       }
     };
 
     const refs = {
       remoteStats: document.getElementById("remoteStats"),
       refreshRemoteBtn: document.getElementById("refreshRemoteBtn"),
+      workspaceIdInput: document.getElementById("workspaceIdInput"),
+      editorNameInput: document.getElementById("editorNameInput"),
+      writePasscodeInput: document.getElementById("writePasscodeInput"),
       lifecycleFiles: document.getElementById("lifecycleFiles"),
       productListFiles: document.getElementById("productListFiles"),
       creatorFiles: document.getElementById("creatorFiles"),
@@ -410,6 +470,27 @@
     };
 
     const formatInt = (value) => new Intl.NumberFormat("zh-CN").format(Number(value || 0));
+
+    function loadAdminSyncSettings() {
+      try {
+        const saved = JSON.parse(localStorage.getItem(ADMIN_SYNC_SETTINGS_KEY) || "{}");
+        return {
+          workspaceId: String(saved.workspaceId || PUBLIC_READ_SYNC_SETTINGS.workspaceId || "").trim(),
+          editorName: String(saved.editorName || "").trim(),
+          writePasscode: String(saved.writePasscode || "").trim()
+        };
+      } catch {
+        return {
+          workspaceId: PUBLIC_READ_SYNC_SETTINGS.workspaceId,
+          editorName: "",
+          writePasscode: ""
+        };
+      }
+    }
+
+    function persistAdminSyncSettings() {
+      localStorage.setItem(ADMIN_SYNC_SETTINGS_KEY, JSON.stringify(state.syncSettings));
+    }
 
     function normalizeText(value) {
       return String(value ?? "")
@@ -467,10 +548,42 @@
       });
       if (!response.ok) {
         const text = await response.text();
-        throw new Error(text || `Supabase ${response.status}`);
+        throw new Error(formatSupabaseError(text || `Supabase ${response.status}`));
       }
       if (response.status === 204) return null;
       return response.json();
+    }
+
+    function formatSupabaseError(raw) {
+      const text = String(raw || "").trim();
+      if (!text) return "共享库请求失败。";
+      try {
+        const parsed = JSON.parse(text);
+        const message = String(parsed.message || parsed.error || parsed.details || "").trim();
+        if (/invalid write passcode/i.test(message)) return "写入口令错误，请检查后重试。";
+        if (/workspace not found/i.test(message)) return "未找到该 workspace，请先在 Supabase 里创建或确认 creator-dashboard-prod 工作区。";
+        if (/relation .* does not exist/i.test(message) || /function .* does not exist/i.test(message)) {
+          return "线上映射表或 RPC 还没有初始化，请先执行 mapping_sync_setup.sql。";
+        }
+        return message || text;
+      } catch {
+        if (/invalid write passcode/i.test(text)) return "写入口令错误，请检查后重试。";
+        if (/workspace not found/i.test(text)) return "未找到该 workspace，请先在 Supabase 里创建或确认 creator-dashboard-prod 工作区。";
+        if (/relation .* does not exist/i.test(text) || /function .* does not exist/i.test(text)) {
+          return "线上映射表或 RPC 还没有初始化，请先执行 mapping_sync_setup.sql。";
+        }
+        return text;
+      }
+    }
+
+    function validateWriteAccess() {
+      const workspaceId = String(state.syncSettings.workspaceId || "").trim();
+      const editorName = String(state.syncSettings.editorName || "").trim();
+      const writePasscode = String(state.syncSettings.writePasscode || "").trim();
+      if (!workspaceId) throw new Error("当前 workspace_id 为空，请先确认配置。");
+      if (!editorName) throw new Error("请先填写编辑人，再执行线上写入。");
+      if (!writePasscode) throw new Error("请先填写写入口令，再执行线上写入。");
+      return { workspaceId, editorName, writePasscode };
     }
 
     async function fetchAllSupabaseRows(table, select) {
@@ -577,8 +690,8 @@
         },
         {
           label: "写入模式",
-          value: "公开可写",
-          note: "本版不做登录，后续可切回口令校验。"
+          value: "共享口令",
+          note: "读保持公开，写入时要求编辑人和共享口令。"
         }
       ];
       refs.remoteStats.innerHTML = cards.map((card) => `
@@ -872,13 +985,14 @@
       try {
         const preview = state.previews.lifecycle || buildLifecyclePreview();
         state.previews.lifecycle = preview;
+        const access = validateWriteAccess();
         const result = await supabaseRequest("/rpc/upsert_product_lifecycle_map_batch", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            p_workspace_id: PUBLIC_READ_SYNC_SETTINGS.workspaceId,
-            p_passcode: null,
-            p_editor_name: PUBLIC_READ_SYNC_SETTINGS.editorName,
+            p_workspace_id: access.workspaceId,
+            p_passcode: access.writePasscode,
+            p_editor_name: access.editorName,
             p_source_file: preview.sourceFile,
             p_rows: preview.rows
           })
@@ -901,13 +1015,14 @@
       try {
         const preview = state.previews.creator || buildCreatorPreview();
         state.previews.creator = preview;
+        const access = validateWriteAccess();
         const result = await supabaseRequest("/rpc/upsert_creator_level_map_batch", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            p_workspace_id: PUBLIC_READ_SYNC_SETTINGS.workspaceId,
-            p_passcode: null,
-            p_editor_name: PUBLIC_READ_SYNC_SETTINGS.editorName,
+            p_workspace_id: access.workspaceId,
+            p_passcode: access.writePasscode,
+            p_editor_name: access.editorName,
             p_source_file: preview.sourceFile,
             p_rows: preview.rows
           })
@@ -927,6 +1042,15 @@
     bindFileInput(refs.lifecycleFiles, "lifecycle", refs.lifecycleStatus, "生命周期表");
     bindFileInput(refs.productListFiles, "productList", refs.productListStatus, "product_list", "可选上传");
     bindFileInput(refs.creatorFiles, "creator", refs.creatorStatus, "达人等级表");
+
+    refs.editorNameInput.addEventListener("input", () => {
+      state.syncSettings.editorName = refs.editorNameInput.value.trim();
+      persistAdminSyncSettings();
+    });
+    refs.writePasscodeInput.addEventListener("input", () => {
+      state.syncSettings.writePasscode = refs.writePasscodeInput.value;
+      persistAdminSyncSettings();
+    });
 
     refs.refreshRemoteBtn.addEventListener("click", async () => {
       try {
@@ -965,6 +1089,10 @@
     });
 
     renderRemoteStats();
+    state.syncSettings = loadAdminSyncSettings();
+    refs.workspaceIdInput.value = state.syncSettings.workspaceId;
+    refs.editorNameInput.value = state.syncSettings.editorName;
+    refs.writePasscodeInput.value = state.syncSettings.writePasscode;
     renderPreviewStats(refs.lifecycleStats, [
       { label: "识别记录", value: 0, note: "等待生命周期表预览。" },
       { label: "有效 PID", value: 0, note: "等待生命周期表预览。" },
