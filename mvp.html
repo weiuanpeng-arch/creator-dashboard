@@ -1882,6 +1882,7 @@
     }
 
     function buildLifecycleFilteredRows(filters) {
+      const isPidKeyword = /^\d{10,}$/.test(filters.keyword);
       const matchesBase = (row) => {
         const periodValue = row.product_period || "未设置阶段";
         const brandHit = !filters.brands.length || filters.brands.includes(row.brand);
@@ -1892,13 +1893,33 @@
         return brandHit && levelHit && periodHit && startHit && endHit;
       };
 
+      const matchesLifecycleKeyword = (row) => {
+        if (!filters.keyword) return true;
+        if (isPidKeyword) {
+          return String(row.product_id || "").trim() === filters.keyword
+            || normalizeText(row.products_text).includes(filters.keyword);
+        }
+        return [
+          row.brand,
+          row.creator_name,
+          row.creator_level,
+          row.product_period,
+          row.product_name_cn,
+          row.product_name_raw,
+          row.product_id,
+          row.products_text,
+          row.video_id
+        ].some((field) => normalizeText(field).includes(filters.keyword));
+      };
+
       const lifecycleRows = aggregateLifecycleRows(
-        state.merged.transactionRows.filter(matchesBase),
-        state.merged.performanceRows.filter(matchesBase)
+        state.merged.transactionRows.filter((row) => matchesBase(row) && matchesLifecycleKeyword(row)),
+        state.merged.performanceRows.filter((row) => matchesBase(row) && matchesLifecycleKeyword(row))
       );
 
       return lifecycleRows.filter((row) => {
         if (!filters.keyword) return true;
+        if (isPidKeyword) return row._productIds.includes(filters.keyword) || normalizeText(row._productSearch).includes(filters.keyword);
         return [
           row.brand,
           row.product_period,
