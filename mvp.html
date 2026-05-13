@@ -550,16 +550,16 @@
           <div class="status wait" id="performanceStatus"><span class="dot"></span>等待上传</div>
         </div>
         <div class="upload-card">
-          <strong>3. 产品生命周期表</strong>
-          <div class="mini">支持多文件拼接。通过 `PID` 补产品阶段、中文名、原始品名。</div>
+          <strong>3. 产品生命周期表（可选兜底）</strong>
+          <div class="mini">默认使用线上生命周期映射。本地上传仅用于线上不可用或临时覆盖。</div>
           <input id="lifecycleFiles" type="file" accept=".xlsx,.xls" multiple>
-          <div class="status wait" id="lifecycleStatus"><span class="dot"></span>等待上传</div>
+          <div class="status wait" id="lifecycleStatus"><span class="dot"></span>正在读取线上映射</div>
         </div>
         <div class="upload-card">
-          <strong>4. 达人等级表</strong>
-          <div class="mini">支持多文件拼接。通过 `Creator name` 补达人等级，未命中默认 `L3`。</div>
+          <strong>4. 达人等级表（可选兜底）</strong>
+          <div class="mini">默认使用线上达人等级映射。本地上传仅用于线上不可用或临时覆盖。</div>
           <input id="creatorFiles" type="file" accept=".xlsx,.xls" multiple>
-          <div class="status wait" id="creatorStatus"><span class="dot"></span>等待上传</div>
+          <div class="status wait" id="creatorStatus"><span class="dot"></span>正在读取线上映射</div>
         </div>
       </div>
     </section>
@@ -969,6 +969,7 @@
       }
 
       state.remote.lastLoadedAt = new Date().toLocaleString("zh-CN", { hour12: false });
+      updateMappingUploadStatuses();
       if (!silent) {
         renderHealth();
       }
@@ -978,6 +979,32 @@
     function setStatus(node, type, text) {
       node.className = `status ${type}`;
       node.innerHTML = `<span class="dot"></span>${text}`;
+    }
+
+    function updateMappingUploadStatuses() {
+      if (state.files.lifecycle.length) {
+        setStatus(refs.lifecycleStatus, "ready", `本地产品表已缓存 ${state.files.lifecycle.length} 个文件`);
+      } else if (state.remote.lifecycleRows.length) {
+        setStatus(refs.lifecycleStatus, "ready", `线上映射已就绪 ${formatInt(state.remote.lifecycleRows.length)} 条`);
+      } else if (state.remote.status.lifecycle === "empty") {
+        setStatus(refs.lifecycleStatus, "warn", "线上映射为空，可上传本地表兜底");
+      } else if (state.remote.status.lifecycle === "error") {
+        setStatus(refs.lifecycleStatus, "warn", "线上读取失败，可上传本地表兜底");
+      } else {
+        setStatus(refs.lifecycleStatus, "wait", "正在读取线上映射");
+      }
+
+      if (state.files.creator.length) {
+        setStatus(refs.creatorStatus, "ready", `本地达人表已缓存 ${state.files.creator.length} 个文件`);
+      } else if (state.remote.creatorRows.length) {
+        setStatus(refs.creatorStatus, "ready", `线上映射已就绪 ${formatInt(state.remote.creatorRows.length)} 条`);
+      } else if (state.remote.status.creator === "empty") {
+        setStatus(refs.creatorStatus, "warn", "线上映射为空，可上传本地表兜底");
+      } else if (state.remote.status.creator === "error") {
+        setStatus(refs.creatorStatus, "warn", "线上读取失败，可上传本地表兜底");
+      } else {
+        setStatus(refs.creatorStatus, "wait", "正在读取线上映射");
+      }
     }
 
     function safeNumber(value) {
@@ -2829,6 +2856,9 @@
         } finally {
           input.value = "";
           input.disabled = false;
+          if (key === "lifecycle" || key === "creator") {
+            updateMappingUploadStatuses();
+          }
           updateProcessState();
         }
       });
@@ -2892,6 +2922,7 @@
       state.remote.status.creator = "error";
       state.remote.errors.lifecycle = String(error.message || error || "线上映射读取失败");
       state.remote.errors.creator = String(error.message || error || "线上映射读取失败");
+      updateMappingUploadStatuses();
       renderHealth();
       updateProcessState();
     });
