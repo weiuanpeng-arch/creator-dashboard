@@ -409,6 +409,7 @@
   </div>
 
   <script>
+    const DEFAULT_CREATOR_LEVEL = "L4";
     const BRAND_RULES = [
       { code: "SPARCO", tokens: ["spar.co", "sparco", "spar co"] },
       { code: "LETME", tokens: ["let me", "letme"] },
@@ -736,7 +737,7 @@
         state.remote.creatorRows = (creatorRows || []).map((row) => ({
           brand: resolveBrand(row.brand),
           creator_name: String(row.creator_name || "").trim(),
-          creator_level: String(row.creator_level || "L3").trim() || "L3"
+          creator_level: String(row.creator_level || DEFAULT_CREATOR_LEVEL).trim() || DEFAULT_CREATOR_LEVEL
         })).filter((row) => row.creator_name && row.brand !== "UNKNOWN");
         state.remote.lastLoadedAt = new Date().toLocaleString("zh-CN", { hour12: false });
         renderRemoteStats();
@@ -920,7 +921,7 @@
           deduped.set(`${brand}__${normalizeText(creatorName)}`, {
             brand,
             creator_name: creatorName,
-            creator_level: creatorLevel || "L3",
+            creator_level: creatorLevel || DEFAULT_CREATOR_LEVEL,
             source_file: file.name
           });
         });

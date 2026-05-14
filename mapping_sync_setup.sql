@@ -52,12 +52,15 @@ create table if not exists public.creator_level_map (
   workspace_id text not null references public.creator_sync_workspaces(workspace_id) on delete cascade,
   brand text not null,
   creator_name text not null,
-  creator_level text not null default 'L3',
+  creator_level text not null default 'L4',
   source_file text,
   updated_by text,
   updated_at timestamptz not null default now(),
   primary key (workspace_id, brand, creator_name)
 );
+
+alter table public.creator_level_map
+  alter column creator_level set default 'L4';
 
 alter table public.product_lifecycle_map enable row level security;
 alter table public.creator_level_map enable row level security;

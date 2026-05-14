@@ -708,6 +708,7 @@
 
   <script>
     const BRANDS = ["sparco", "letme", "icyee", "stypro"];
+    const DEFAULT_CREATOR_LEVEL = "L4";
     const BRAND_RULES = [
       { code: "SPARCO", tokens: ["spar.co", "sparco", "spar co"] },
       { code: "LETME", tokens: ["let me", "letme"] },
@@ -933,7 +934,7 @@
       return {
         brand: resolveBrand(row.brand),
         creator_name: creator,
-        creator_level: String(row.creator_level || "L3").trim() || "L3"
+        creator_level: String(row.creator_level || DEFAULT_CREATOR_LEVEL).trim() || DEFAULT_CREATOR_LEVEL
       };
     }
 
@@ -1394,7 +1395,7 @@
           allRows.push({
             brand: resolveBrand(String(row[columns.brand] || "").trim(), file.name),
             creator_name: creator,
-            creator_level: String(row[columns.level] || "L3").trim() || "L3"
+            creator_level: String(row[columns.level] || DEFAULT_CREATOR_LEVEL).trim() || DEFAULT_CREATOR_LEVEL
           });
         });
       }
@@ -1433,10 +1434,13 @@
       state.merged.transactionRows = state.raw.transactionRows.map((row) => {
         const lifecycle = dimensions.lifecycleMap.get(row.product_id) || null;
         const creatorKey = normalizeText(row.creator_name);
-        const creatorLevel = dimensions.creatorMap.get(`${row.brand}__${creatorKey}`) || "L3";
+        const creatorMapKey = `${row.brand}__${creatorKey}`;
+        const creatorLevelMatched = dimensions.creatorMap.has(creatorMapKey);
+        const creatorLevel = dimensions.creatorMap.get(creatorMapKey) || DEFAULT_CREATOR_LEVEL;
         return {
           ...row,
           creator_level: creatorLevel,
+          creator_level_matched: creatorLevelMatched,
           product_name_cn: lifecycle?.product_name_cn || "",
           product_period: lifecycle?.product_period || "",
           lifecycle_matched: Boolean(lifecycle)
@@ -1454,11 +1458,14 @@
       state.merged.performanceRows = state.raw.performanceRows.map((row) => {
         const lifecycle = row.product_id ? dimensions.lifecycleMap.get(row.product_id) : null;
         const creatorKey = normalizeText(row.creator_name);
-        const creatorLevel = dimensions.creatorMap.get(`${row.brand}__${creatorKey}`) || "L3";
+        const creatorMapKey = `${row.brand}__${creatorKey}`;
+        const creatorLevelMatched = dimensions.creatorMap.has(creatorMapKey);
+        const creatorLevel = dimensions.creatorMap.get(creatorMapKey) || DEFAULT_CREATOR_LEVEL;
         return {
           ...row,
           video_link: videoLinkMap.get(row.video_id) || "",
           creator_level: creatorLevel,
+          creator_level_matched: creatorLevelMatched,
           product_name_cn: lifecycle?.product_name_cn || "",
           product_period: lifecycle?.product_period || "",
           lifecycle_matched: Boolean(lifecycle)
@@ -1553,7 +1560,7 @@
       }
 
       function ensureLevel(bucket, level) {
-        const creatorLevel = level || "L3";
+        const creatorLevel = level || DEFAULT_CREATOR_LEVEL;
         if (!bucket._levelMap.has(creatorLevel)) {
           bucket._levelMap.set(creatorLevel, {
             level: creatorLevel,
@@ -1563,7 +1570,11 @@
             txn_gmv: 0,
             txn_orders: 0,
             _creatorKeys: new Set(),
-            _videoIds: new Set()
+            _videoIds: new Set(),
+            _unmatchedCreatorKeys: new Set(),
+            _unmatchedVideoIds: new Set(),
+            unmatched_vv: 0,
+            unmatched_txn_gmv: 0
           });
         }
         return bucket._levelMap.get(creatorLevel);
@@ -1595,7 +1606,7 @@
       }
 
       function ensureProductLevel(product, level) {
-        const creatorLevel = level || "L3";
+        const creatorLevel = level || DEFAULT_CREATOR_LEVEL;
         if (!product._levelMap.has(creatorLevel)) {
           product._levelMap.set(creatorLevel, {
             level: creatorLevel,
@@ -1634,6 +1645,11 @@
         if (row.creator_name) level._creatorKeys.add(`${row.brand}__${normalizeText(row.creator_name)}`);
         if (row.video_id) level._videoIds.add(row.video_id);
         level.vv += row.vv;
+        if (!row.creator_level_matched) {
+          if (row.creator_name) level._unmatchedCreatorKeys.add(`${row.brand}__${normalizeText(row.creator_name)}`);
+          if (row.video_id) level._unmatchedVideoIds.add(row.video_id);
+          level.unmatched_vv += row.vv;
+        }
 
         if (row.creator_name) product._creatorKeys.add(`${row.brand}__${normalizeText(row.creator_name)}`);
         if (row.video_id) {
@@ -1669,6 +1685,11 @@
         if (row.video_id) level._videoIds.add(row.video_id);
         level.txn_gmv += row.gmv;
         level.txn_orders += row.orders;
+        if (!row.creator_level_matched) {
+          if (row.creator_name) level._unmatchedCreatorKeys.add(`${row.brand}__${normalizeText(row.creator_name)}`);
+          if (row.video_id) level._unmatchedVideoIds.add(row.video_id);
+          level.unmatched_txn_gmv += row.gmv;
+        }
 
         if (row.creator_name) product._creatorKeys.add(`${row.brand}__${normalizeText(row.creator_name)}`);
         if (row.video_id) {
@@ -1701,7 +1722,9 @@
             .map((level) => ({
               ...level,
               creator_count: level._creatorKeys.size,
-              video_count: level._videoIds.size
+              video_count: level._videoIds.size,
+              unmatched_creator_count: level._unmatchedCreatorKeys.size,
+              unmatched_video_count: level._unmatchedVideoIds.size
             }))
             .sort((a, b) => a.level.localeCompare(b.level, "zh-CN")),
           product_breakdown: [...row._productMap.values()]
@@ -1976,7 +1999,7 @@
             { label: "归因订单", value: formatInt(rows.reduce((sum, row) => sum + row.orders, 0)), note: "来自交易归因表。" },
             { label: "去重达人", value: formatInt(new Set(rows.map((row) => normalizeText(row.creator_name))).size), note: "当前筛选范围内的达人。" },
             { label: "PID 阶段命中率", value: formatPct(rows.length ? rows.filter((row) => row.lifecycle_matched).length / rows.length * 100 : 0), note: "命中产品生命周期表的占比。" },
-            { label: "达人等级命中率", value: formatPct(rows.length ? rows.filter((row) => row.creator_level !== "L3").length / rows.length * 100 : 0), note: "命中达人等级表的占比。" }
+            { label: "达人等级命中率", value: formatPct(rows.length ? rows.filter((row) => row.creator_level_matched).length / rows.length * 100 : 0), note: "命中达人等级表的占比。" }
           ],
           trend: [...trendMap.values()].sort((a, b) => a.date.localeCompare(b.date)).slice(-14),
           brands,
@@ -2174,21 +2197,26 @@
 
       if (state.currentView === "lifecycle") {
         refs.issueTitle.textContent = "生命周期覆盖短板";
-        refs.issueDesc.textContent = "优先看默认 L3 比重高、但已经有播放或成交的生命周期分组。";
+        refs.issueDesc.textContent = `优先看默认 ${DEFAULT_CREATOR_LEVEL} 比重高、但已经有播放或成交的生命周期分组。`;
         const issues = rows
           .map((row) => {
-            const l3 = (row.level_breakdown || []).find((item) => item.level === "L3");
-            return { ...row, l3_creator_count: l3?.creator_count || 0, l3_vv: l3?.vv || 0, l3_txn_gmv: l3?.txn_gmv || 0 };
+            const defaultLevel = (row.level_breakdown || []).find((item) => item.level === DEFAULT_CREATOR_LEVEL);
+            return {
+              ...row,
+              default_level_creator_count: defaultLevel?.unmatched_creator_count || 0,
+              default_level_vv: defaultLevel?.unmatched_vv || 0,
+              default_level_txn_gmv: defaultLevel?.unmatched_txn_gmv || 0
+            };
           })
-          .filter((row) => row.l3_creator_count > 0 && (row.l3_vv > 0 || row.l3_txn_gmv > 0))
+          .filter((row) => row.default_level_creator_count > 0 && (row.default_level_vv > 0 || row.default_level_txn_gmv > 0))
           .slice()
-          .sort((a, b) => (b.l3_txn_gmv + b.l3_vv) - (a.l3_txn_gmv + a.l3_vv))
+          .sort((a, b) => (b.default_level_txn_gmv + b.default_level_vv) - (a.default_level_txn_gmv + a.default_level_vv))
           .slice(0, 6);
         refs.issueList.innerHTML = issues.length ? issues.map((item) => `
           <div class="list-item">
             <strong>${item.product_period} / ${item.brand}</strong>
-            <span class="pill">L3 达人 ${formatInt(item.l3_creator_count)} 个</span>
-            <span class="mini">VV ${formatInt(item.l3_vv)} / GMV ${formatRp(item.l3_txn_gmv)}</span>
+            <span class="pill">${DEFAULT_CREATOR_LEVEL} 未匹配达人 ${formatInt(item.default_level_creator_count)} 个</span>
+            <span class="mini">VV ${formatInt(item.default_level_vv)} / GMV ${formatRp(item.default_level_txn_gmv)}</span>
           </div>
         `).join("") : `<div class="empty">当前筛选范围内没有需要优先补达人等级的生命周期分组。</div>`;
         return;
@@ -2239,14 +2267,14 @@
         : state.currentView === "performance"
           ? [
               "优先看高 VV 但 CTR / 完播偏低的视频，调整内容题材。",
-              "把高播放达人映射到达人等级表，减少默认 L3。",
+              `把高播放达人映射到达人等级表，减少默认 ${DEFAULT_CREATOR_LEVEL}。`,
               "按品牌筛选查看哪一类内容更能带来高播放。",
               "后续把异常 Diagnosis 单独做预警面板。"
             ]
           : state.currentView === "lifecycle"
             ? [
-                "优先补齐有播放或成交但仍为 L3 的生命周期达人映射。",
-                "同一生命周期内，对比 L1/L2/L3 的达人数和视频产出，找出层级覆盖缺口。",
+                `优先补齐有播放或成交但仍为 ${DEFAULT_CREATOR_LEVEL} 的生命周期达人映射。`,
+                "同一生命周期内，对比 L1/L2/L3/L4 的达人数和视频产出，找出层级覆盖缺口。",
                 "先看高 VV 但 GMV 偏弱的生命周期分组，排查挂车商品和内容适配。",
                 "对高 GMV 且达人覆盖少的生命周期，补更多同层级达人测试。"
               ]
@@ -2596,7 +2624,7 @@
           rowBuilder: (row) => [
             row.brand,
             row.creator_name,
-            `<span class="pill ${row.creator_level === "L3" ? "" : "green"}">${row.creator_level}</span>`,
+            `<span class="pill ${row.creator_level === DEFAULT_CREATOR_LEVEL ? "" : "green"}">${row.creator_level}</span>`,
             renderProductCell(row.product_name_cn, row.product_name_raw),
             row.product_id,
             row.product_period || '<span class="mini">未设置</span>',
@@ -2617,7 +2645,7 @@
           rowBuilder: (row) => [
             row.brand,
             row.creator_name,
-            `<span class="pill ${row.creator_level === "L3" ? "" : "green"}">${row.creator_level}</span>`,
+            `<span class="pill ${row.creator_level === DEFAULT_CREATOR_LEVEL ? "" : "green"}">${row.creator_level}</span>`,
             renderProductCell(row.product_name_cn, row.product_name_raw || stripPidFromProducts(row.products_text)),
             formatInt(row.vv),
             formatInt(row.likes),
@@ -2663,7 +2691,7 @@
             row.brand,
             row.creator_name || '<span class="mini">无</span>',
             row.entity_type === "视频" ? renderVideoIdCell(row.video_id, row.creator_name, row.video_link) : '<span class="mini">达人汇总</span>',
-            `<span class="pill ${row.creator_level === "L3" ? "" : "green"}">${row.creator_level || "L3"}</span>`,
+            `<span class="pill ${row.creator_level === DEFAULT_CREATOR_LEVEL ? "" : "green"}">${row.creator_level || DEFAULT_CREATOR_LEVEL}</span>`,
             formatInt(row.video_count),
             formatInt(row.orders),
             formatInt(row.items_sold),
@@ -2683,7 +2711,7 @@
         rowBuilder: (row) => [
           row.brand,
           row.creator_name,
-          `<span class="pill ${row.creator_level === "L3" ? "" : "green"}">${row.creator_level}</span>`,
+          `<span class="pill ${row.creator_level === DEFAULT_CREATOR_LEVEL ? "" : "green"}">${row.creator_level}</span>`,
           renderProductCell(row.product_name_cn, row.product_name_raw),
           formatInt(row.vv),
           formatPct(row.ctr),
