@@ -343,14 +343,14 @@
         <div class="upload-grid">
           <div class="upload-card">
             <strong>1. 生命周期表</strong>
-            <div class="mini">至少上传 1 个文件，必需字段：`PID`。</div>
-            <input id="lifecycleFiles" type="file" accept=".xlsx,.xls" multiple>
+            <div class="mini">至少上传 1 个文件，必需字段：`PID` 或 `TK ID`。支持 `.xlsx / .xls / .csv`。</div>
+            <input id="lifecycleFiles" type="file" accept=".xlsx,.xls,.csv" multiple>
             <div class="status wait" id="lifecycleStatus"><span class="dot"></span>等待上传</div>
           </div>
           <div class="upload-card">
             <strong>2. product_list（可选）</strong>
             <div class="mini">若生命周期表里的 `product name` 缺失，可额外上传 1 个或多个 `product_list` 自动补齐。</div>
-            <input id="productListFiles" type="file" accept=".xlsx,.xls" multiple>
+            <input id="productListFiles" type="file" accept=".xlsx,.xls,.csv" multiple>
             <div class="status wait" id="productListStatus"><span class="dot"></span>可选上传</div>
           </div>
           <div class="upload-card">
@@ -384,7 +384,7 @@
           <div class="upload-card">
             <strong>1. 达人等级表</strong>
             <div class="mini">必需字段：`creator name / sparco`、`creator level / level`。品牌可来自表内字段，也可从文件名识别。</div>
-            <input id="creatorFiles" type="file" accept=".xlsx,.xls" multiple>
+            <input id="creatorFiles" type="file" accept=".xlsx,.xls,.csv" multiple>
             <div class="status wait" id="creatorStatus"><span class="dot"></span>等待上传</div>
           </div>
           <div class="upload-card">
@@ -624,7 +624,10 @@
 
     function readWorkbookArrays(file) {
       try {
-        const workbook = XLSX.read(file.buffer, { type: "array" });
+        const isCsv = String(file.name || "").toLowerCase().endsWith(".csv");
+        const workbook = isCsv
+          ? XLSX.read(new TextDecoder("utf-8").decode(file.buffer), { type: "string" })
+          : XLSX.read(file.buffer, { type: "array" });
         const sheet = workbook.Sheets[workbook.SheetNames[0]];
         return XLSX.utils.sheet_to_json(sheet, { header: 1, defval: "" });
       } catch (error) {
@@ -815,15 +818,18 @@
 
       state.files.lifecycle.forEach((file) => {
         const matrix = readWorkbookArrays(file);
-        const rows = extractRowsWithDetectedHeader(matrix, ["PID"]);
+        let rows = extractRowsWithDetectedHeader(matrix, ["PID"]);
         if (!rows.length) {
-          issues.push(`生命周期文件「${file.name}」未识别到有效表头，期望字段包含：PID`);
+          rows = extractRowsWithDetectedHeader(matrix, ["TK ID"]);
+        }
+        if (!rows.length) {
+          issues.push(`生命周期文件「${file.name}」未识别到有效表头，期望字段包含：PID 或 TK ID`);
           return;
         }
         const sample = rows[0] || {};
-        const pidKey = findKey(sample, ["PID", "Product ID"]);
-        const periodKey = findKey(sample, ["product period", "产品阶段", "period"]);
-        const productNameKey = findKey(sample, ["product name", "product name_raw", "product name raw"]);
+        const pidKey = findKey(sample, ["PID", "Product ID", "TK ID", "TKID"]);
+        const periodKey = findKey(sample, ["product period", "产品阶段", "阶段", "period"]);
+        const productNameKey = findKey(sample, ["product name", "product name_raw", "product name raw", "Product"]);
         const productNameCnKey = findKey(sample, ["产品名", "product name_cn", "product name cn"]);
 
         rows.forEach((row) => {
