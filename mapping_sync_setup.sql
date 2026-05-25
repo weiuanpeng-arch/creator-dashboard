@@ -42,11 +42,19 @@ create table if not exists public.product_lifecycle_map (
   product_period text,
   product_name text,
   product_name_cn text,
+  spu text,
+  is_main_link boolean not null default false,
   source_file text,
   updated_by text,
   updated_at timestamptz not null default now(),
   primary key (workspace_id, pid)
 );
+
+alter table public.product_lifecycle_map
+  add column if not exists spu text;
+
+alter table public.product_lifecycle_map
+  add column if not exists is_main_link boolean not null default false;
 
 create table if not exists public.creator_level_map (
   workspace_id text not null references public.creator_sync_workspaces(workspace_id) on delete cascade,
@@ -107,13 +115,17 @@ begin
       nullif(trim(coalesce(brand, '')), '') as brand,
       nullif(trim(coalesce(product_period, '')), '') as product_period,
       nullif(trim(coalesce(product_name, '')), '') as product_name,
-      nullif(trim(coalesce(product_name_cn, '')), '') as product_name_cn
+      nullif(trim(coalesce(product_name_cn, '')), '') as product_name_cn,
+      nullif(trim(coalesce(spu, '')), '') as spu,
+      coalesce(is_main_link, false) as is_main_link
     from jsonb_to_recordset(coalesce(p_rows, '[]'::jsonb)) as x(
       pid text,
       brand text,
       product_period text,
       product_name text,
-      product_name_cn text
+      product_name_cn text,
+      spu text,
+      is_main_link boolean
     )
   ),
   valid_rows as (
@@ -128,7 +140,9 @@ begin
       brand,
       product_period,
       product_name,
-      product_name_cn
+      product_name_cn,
+      spu,
+      is_main_link
     from valid_rows
     order by pid, seq desc
   ),
@@ -147,6 +161,8 @@ begin
       product_period,
       product_name,
       product_name_cn,
+      spu,
+      is_main_link,
       source_file,
       updated_by,
       updated_at
@@ -158,6 +174,8 @@ begin
       product_period,
       product_name,
       product_name_cn,
+      spu,
+      is_main_link,
       nullif(trim(coalesce(p_source_file, '')), ''),
       nullif(trim(coalesce(p_editor_name, '')), ''),
       now()
@@ -168,6 +186,8 @@ begin
       product_period = excluded.product_period,
       product_name = excluded.product_name,
       product_name_cn = excluded.product_name_cn,
+      spu = excluded.spu,
+      is_main_link = excluded.is_main_link,
       source_file = excluded.source_file,
       updated_by = excluded.updated_by,
       updated_at = now()

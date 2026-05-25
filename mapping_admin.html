@@ -332,7 +332,7 @@
           <div>
             <div class="pill">生命周期映射</div>
             <h2 style="margin-top:8px;">上传生命周期表并更新线上库</h2>
-            <p>支持先读生命周期表中的 `PID / product period / product name / 产品名`，再用可选的 `product_list` 按 `ID -> Product` 自动补全 `product name`。</p>
+            <p>支持先读生命周期表中的 `PID / product period / product name / 产品名`，并同步写入 `SPU / 是否主链`；也可用可选的 `product_list` 按 `ID -> Product` 自动补全 `product name`。</p>
           </div>
           <div class="section-actions">
             <button id="previewLifecycleBtn" class="secondary">预览本次更新</button>
@@ -517,6 +517,12 @@
         if (hit !== "UNKNOWN") return hit;
       }
       return "UNKNOWN";
+    }
+
+    function parseMainLinkFlag(value) {
+      const text = normalizeText(value);
+      if (!text || text === "-" || text === "0" || text === "false" || text === "no" || text === "否") return false;
+      return text.includes("主链") || text.includes("main") || text.includes("yes") || text === "1" || text === "true" || text === "是" || text.includes("✓");
     }
 
     function setStatus(node, type, text) {
@@ -831,6 +837,8 @@
         const periodKey = findKey(sample, ["product period", "产品阶段", "阶段", "period"]);
         const productNameKey = findKey(sample, ["product name", "product name_raw", "product name raw", "Product"]);
         const productNameCnKey = findKey(sample, ["产品名", "product name_cn", "product name cn"]);
+        const spuKey = findKey(sample, ["SPU", "spu"]);
+        const mainLinkKey = findKey(sample, ["是否主链", "主链", "is main link", "main link"]);
 
         rows.forEach((row) => {
           rawCount += 1;
@@ -845,6 +853,8 @@
             product_period: String(row[periodKey] || "").trim(),
             product_name: String(row[productNameKey] || "").trim(),
             product_name_cn: String(row[productNameCnKey] || "").trim(),
+            spu: String(row[spuKey] || "").trim(),
+            is_main_link: parseMainLinkFlag(row[mainLinkKey]),
             source_file: file.name
           });
         });
