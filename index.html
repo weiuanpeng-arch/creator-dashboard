@@ -532,7 +532,7 @@
         <div class="hero-actions">
           <a class="button-like secondary" href="./mapping_admin.html" target="_blank" rel="noreferrer">维护在线映射</a>
           <button id="processBtn" disabled>生成监控结果</button>
-          <button id="downloadBtn" class="secondary" disabled>下载当前视图 CSV</button>
+          <button id="downloadBtn" class="secondary" disabled>下载当前数据 CSV</button>
         </div>
       </div>
 
@@ -665,7 +665,10 @@
           <h2 id="tableTitle">明细表</h2>
           <p id="tableDesc">当前视图的明细预览，可按品牌、达人等级、产品阶段筛选。</p>
         </div>
-        <div class="tag" id="tableTag">Detail</div>
+        <div class="section-actions">
+          <button id="tableDownloadBtn" class="secondary" disabled>导出当前明细</button>
+          <div class="tag" id="tableTag">Detail</div>
+        </div>
       </div>
 
       <div class="filter-grid">
@@ -803,6 +806,7 @@
       tableTitle: document.getElementById("tableTitle"),
       tableDesc: document.getElementById("tableDesc"),
       tableTag: document.getElementById("tableTag"),
+      tableDownloadBtn: document.getElementById("tableDownloadBtn"),
       tableHead: document.getElementById("tableHead"),
       detailTable: document.getElementById("detailTable"),
       pageInfo: document.getElementById("pageInfo"),
@@ -1215,6 +1219,7 @@
     function enableControls() {
       [
         refs.downloadBtn,
+        refs.tableDownloadBtn,
         refs.searchInput,
         refs.brandFilter,
         refs.levelFilter,
@@ -2808,6 +2813,202 @@
       renderTable(state.filteredRows);
     }
 
+    function getExportRows() {
+      return state.filteredRows;
+    }
+
+    function exportProductName(row) {
+      return row.product_name_raw || row.product_name_cn || stripPidFromProducts(row.products_text) || "";
+    }
+
+    function exportRefundFlags(row) {
+      const flags = [];
+      if (row.items_sold < 5) flags.push("小样本");
+      if (row.refund_rate > 100) flags.push("跨期/异常口径");
+      if (row.refund_rate >= 20 && row.refund_rate <= 100) flags.push("高退货率");
+      return flags.join("；") || "正常范围";
+    }
+
+    function buildLifecycleExportRows(rows) {
+      const exportRows = [];
+      rows.forEach((row) => {
+        exportRows.push({
+          row_type: "生命周期汇总",
+          brand: row.brand,
+          product_period: row.product_period,
+          creator_level: "",
+          product_id: "",
+          product_name: "",
+          creator_count: row.creator_count,
+          product_count: row.product_count,
+          video_count: row.video_count,
+          performance_video_count: row.performance_video_count,
+          transaction_video_count: row.transaction_video_count,
+          vv: row.vv,
+          engagement: row.engagement,
+          txn_gmv: row.txn_gmv,
+          txn_orders: row.txn_orders,
+          items_sold: row.items_sold
+        });
+        (row.level_breakdown || []).forEach((level) => {
+          exportRows.push({
+            row_type: "生命周期 x 达人等级",
+            brand: row.brand,
+            product_period: row.product_period,
+            creator_level: level.level,
+            product_id: "",
+            product_name: "",
+            creator_count: level.creator_count,
+            product_count: "",
+            video_count: level.video_count,
+            performance_video_count: level.performance_video_count || "",
+            transaction_video_count: level.transaction_video_count || "",
+            vv: level.vv,
+            engagement: "",
+            txn_gmv: level.txn_gmv,
+            txn_orders: level.txn_orders,
+            items_sold: ""
+          });
+        });
+        (row.product_breakdown || []).forEach((product) => {
+          const productName = product.product_name_raw || product.product_name_cn || "";
+          exportRows.push({
+            row_type: "产品明细",
+            brand: row.brand,
+            product_period: row.product_period,
+            creator_level: "",
+            product_id: product.product_id,
+            product_name: productName,
+            creator_count: product.creator_count,
+            product_count: "",
+            video_count: product.video_count,
+            performance_video_count: product.performance_video_count,
+            transaction_video_count: product.transaction_video_count,
+            vv: product.vv,
+            engagement: "",
+            txn_gmv: product.txn_gmv,
+            txn_orders: product.txn_orders,
+            items_sold: product.items_sold
+          });
+          (product.level_breakdown || []).forEach((level) => {
+            exportRows.push({
+              row_type: "产品 x 达人等级",
+              brand: row.brand,
+              product_period: row.product_period,
+              creator_level: level.level,
+              product_id: product.product_id,
+              product_name: productName,
+              creator_count: level.creator_count,
+              product_count: "",
+              video_count: level.video_count,
+              performance_video_count: level.performance_video_count,
+              transaction_video_count: level.transaction_video_count,
+              vv: level.vv,
+              engagement: "",
+              txn_gmv: level.txn_gmv,
+              txn_orders: level.txn_orders,
+              items_sold: level.items_sold
+            });
+          });
+        });
+      });
+      return exportRows;
+    }
+
+    function buildExportRows(rows) {
+      if (state.currentView === "transaction") {
+        return rows.map((row) => ({
+          date: row.date_label,
+          brand: row.brand,
+          creator_name: row.creator_name,
+          creator_level: row.creator_level,
+          creator_level_matched: row.creator_level_matched ? "yes" : "no",
+          product_id: row.product_id,
+          product_name: exportProductName(row),
+          product_name_cn: row.product_name_cn,
+          product_period: row.product_period,
+          lifecycle_matched: row.lifecycle_matched ? "yes" : "no",
+          video_id: row.video_id,
+          video_link: row.video_link,
+          gmv: row.gmv,
+          orders: row.orders,
+          items_sold: row.items_sold,
+          refunds: row.refunds,
+          items_refunded: row.items_refunded
+        }));
+      }
+      if (state.currentView === "performance") {
+        return rows.map((row) => ({
+          date: row.date_label,
+          brand: row.brand,
+          creator_name: row.creator_name,
+          creator_level: row.creator_level,
+          creator_level_matched: row.creator_level_matched ? "yes" : "no",
+          product_id: row.product_id,
+          product_name: exportProductName(row),
+          product_name_cn: row.product_name_cn,
+          products_text: row.products_text,
+          product_period: row.product_period,
+          lifecycle_matched: row.lifecycle_matched ? "yes" : "no",
+          video_id: row.video_id,
+          video_link: row.video_link,
+          vv: row.vv,
+          likes: row.likes,
+          comments: row.comments,
+          shares: row.shares,
+          impressions: row.impressions,
+          clicks: row.clicks,
+          orders: row.orders,
+          gmv: row.gmv,
+          ctr: row.ctr,
+          finish_rate: row.finish_rate,
+          diagnosis: row.diagnosis
+        }));
+      }
+      if (state.currentView === "lifecycle") {
+        return buildLifecycleExportRows(rows);
+      }
+      if (state.currentView === "refund") {
+        return rows.map((row) => ({
+          entity_type: row.entity_type,
+          brand: row.brand,
+          creator_name: row.creator_name,
+          creator_level: row.creator_level,
+          video_id: row.video_id,
+          video_link: row.video_link,
+          video_count: row.video_count,
+          orders: row.orders,
+          items_sold: row.items_sold,
+          gmv: row.gmv,
+          refunds: row.refunds,
+          items_refunded: row.items_refunded,
+          return_rate: row.refund_rate,
+          refund_gmv_rate: row.refund_gmv_rate,
+          flags: exportRefundFlags(row)
+        }));
+      }
+      return rows.map((row) => ({
+        date: row.date_label,
+        transaction_date: row.txn_date_value,
+        brand: row.brand,
+        creator_name: row.creator_name,
+        creator_level: row.creator_level,
+        product_name: exportProductName(row),
+        product_name_cn: row.product_name_cn,
+        product_period: row.product_period,
+        video_id: row.video_id,
+        video_link: row.video_link,
+        vv: row.vv,
+        likes: row.likes,
+        comments: row.comments,
+        shares: row.shares,
+        ctr: row.ctr,
+        finish_rate: row.finish_rate,
+        txn_gmv: row.txn_gmv,
+        txn_orders: row.txn_orders
+      }));
+    }
+
     function buildCsv(rows) {
       if (!rows.length) return "";
       const columns = Object.keys(rows[0]).filter((key) => !key.startsWith("_"));
@@ -2822,13 +3023,18 @@
     }
 
     function downloadCurrentCsv() {
-      const rows = state.filteredRows.length ? state.filteredRows : getCurrentRows();
-      const csv = buildCsv(rows);
+      const rows = buildExportRows(getExportRows());
+      if (!rows.length) {
+        alert("当前没有可导出的数据。");
+        return;
+      }
+      const csv = `\uFEFF${buildCsv(rows)}`;
       const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
       const url = URL.createObjectURL(blob);
       const link = document.createElement("a");
       link.href = url;
-      link.download = `${state.currentView}_view.csv`;
+      const date = new Date().toISOString().slice(0, 10);
+      link.download = `creator_dashboard_${state.currentView}_${date}.csv`;
       link.click();
       URL.revokeObjectURL(url);
     }
@@ -2920,6 +3126,7 @@
 
     refs.processBtn.addEventListener("click", handleProcess);
     refs.downloadBtn.addEventListener("click", downloadCurrentCsv);
+    refs.tableDownloadBtn.addEventListener("click", downloadCurrentCsv);
     refs.searchInput.addEventListener("input", applyFilters);
     refs.brandFilterOptions.addEventListener("change", applyFilters);
     refs.levelFilterOptions.addEventListener("change", applyFilters);
