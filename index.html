@@ -1171,7 +1171,13 @@
         time: findKey(sample, ["Post date"]),
         productId: findKey(sample, ["Product ID", "PID"]),
         productName: findKey(sample, ["Product name"]),
-        gmv: findKey(sample, ["Affiliate video-attributed GMV"]),
+        gmv: findKey(sample, [
+          "Affiliate video-attributed GMV",
+          "Creator video-attributed GMV",
+          "Video-attributed GMV",
+          "Shoppable video attributed GMV (Rp)",
+          "Shoppable video attributed GMV"
+        ]),
         orders: findKey(sample, ["Video-attributed orders"]),
         itemsSold: findKey(sample, ["Video-attributed items sold"]),
         refunds: findKey(sample, ["Refunds"]),
@@ -1251,7 +1257,8 @@
         const missing = [
           ["Creator name", columns.creator],
           ["Video ID", columns.videoId],
-          ["Product ID", columns.productId]
+          ["Product ID", columns.productId],
+          ["GMV", columns.gmv]
         ].filter(([, value]) => !value).map(([label]) => label);
         if (missing.length) {
           throw new Error(`交易归因文件「${file.name}」缺少必需字段：${missing.join("、")}`);
